@@ -12,11 +12,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/agent"
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/memory"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/agent"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/memory"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
 
 // 允许 steer 重跑的 stage 白名单。summary 重跑收益低（成本高 + 用户主要追问的是风险点 / 建议），暂不开放。

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
 )
 
 // cachedPayload 缓存的 review 内容。

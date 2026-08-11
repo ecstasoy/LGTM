@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
 )
 
 func TestDetectPrimaryLang(t *testing.T) {

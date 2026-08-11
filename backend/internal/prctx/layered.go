@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
 const (

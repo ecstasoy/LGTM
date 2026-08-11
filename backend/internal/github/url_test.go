@@ -11,7 +11,7 @@ func TestParseURL(t *testing.T) {
 		number  int
 		wantErr bool
 	}{
-		{"基本形态", "https://github.com/ecstasoy/PR-Review-Assistant/pull/3", "ecstasoy", "PR-Review-Assistant", 3, false},
+		{"基本形态", "https://github.com/ecstasoy/LGTM/pull/3", "ecstasoy", "LGTM", 3, false},
 		{"带 /files 后缀", "https://github.com/golang/go/pull/12345/files", "golang", "go", 12345, false},
 		{"末尾斜杠", "https://github.com/golang/go/pull/1/", "golang", "go", 1, false},
 		{"前后空白", "  https://github.com/golang/go/pull/1  ", "golang", "go", 1, false},

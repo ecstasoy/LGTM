@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/oauth"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/session"
+	"github.com/ecstasoy/LGTM/backend/internal/oauth"
+	"github.com/ecstasoy/LGTM/backend/internal/session"
 )
 
 // startPermsTestServer 起带 /api/perms 路由的迷你 server；middleware 简化版自己读 cookie

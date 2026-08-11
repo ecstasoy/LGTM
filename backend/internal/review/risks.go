@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prompts"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/prompts"
 )
 
 // Risk risks_done 事件 payload 中的一项。

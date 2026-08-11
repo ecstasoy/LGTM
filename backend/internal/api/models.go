@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
 // Models GET /api/models：返回可选模型白名单（L3 前端下拉数据源）。

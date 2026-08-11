@@ -15,10 +15,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/store"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // fakeFetcher 让测试注入预设的 PR 数据或错误。

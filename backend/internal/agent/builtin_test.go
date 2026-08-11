@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
 // fakeRetriever 受控返回：可指定 refs / err / 记录最近一次入参

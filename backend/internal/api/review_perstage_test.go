@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
 
 // recordingProvider 记录每次 Stream 收到的 Model，用于验证 per-stage 模型路由。

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prompts"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/prompts"
 )
 
 // SummaryStage 渲染 summary.tmpl，吃 L1 + L2 + L3，输出 markdown 总结。

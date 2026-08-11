@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/session"
+	"github.com/ecstasoy/LGTM/backend/internal/session"
 )
 
 // AuthCtx 读 session cookie → 加载 *session.Session 到 gin.Context

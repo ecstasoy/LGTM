@@ -13,9 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/oauth"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/session"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/store"
+	"github.com/ecstasoy/LGTM/backend/internal/oauth"
+	"github.com/ecstasoy/LGTM/backend/internal/session"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // startAuthTestServer 起一个迷你 server 含 /api/auth/* + /api/me 路由

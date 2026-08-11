@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
 // stubRetriever 受控返回预设 References；用于测 L4 过滤逻辑（阈值 + 去重）

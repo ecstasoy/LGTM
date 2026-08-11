@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/store"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // seedSteerReview 写一条 cached review 给 steer 测试用：files 非空 + 完整 meta

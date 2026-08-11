@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
 )
 
 // detectPrimaryLang 按文件名后缀多数派算 PR 的主语言，给 /history 的语言筛选段控用。

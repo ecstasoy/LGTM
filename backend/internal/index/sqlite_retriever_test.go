@@ -153,12 +153,12 @@ func TestNewSQLiteRetriever_RejectsNilEmbedder(t *testing.T) {
 func TestSQLiteRetriever_ScopeCaseInsensitive(t *testing.T) {
 	r := newRetrieverWithMock(t)
 	ctx := context.Background()
-	if err := r.UpsertMany(ctx, "Ecstasoy/PR-Review-Assistant", []Chunk{
+	if err := r.UpsertMany(ctx, "Ecstasoy/LGTM", []Chunk{
 		{Path: "main.go", Idx: 0, Content: "package main\nfunc main() {}"},
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	hits, err := r.Retrieve(ctx, "ecstasoy/pr-review-assistant", "package main\nfunc main() {}", 4)
+	hits, err := r.Retrieve(ctx, "ecstasoy/lgtm", "package main\nfunc main() {}", 4)
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestSQLiteRetriever_MigratesMixedCaseScopeOnOpen(t *testing.T) {
 	blob := encodeVec([]float32{1, 0, 0})
 	if _, err := seed.Exec(
 		`INSERT INTO chunks(scope, path, idx, content, embedding) VALUES(?,?,?,?,?)`,
-		"Ecstasoy/PR-Review-Assistant", "a.go", 0, "hello", blob,
+		"Ecstasoy/LGTM", "a.go", 0, "hello", blob,
 	); err != nil {
 		t.Fatalf("seed insert: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestSQLiteRetriever_MigratesMixedCaseScopeOnOpen(t *testing.T) {
 	if err := r.db.QueryRow(`SELECT DISTINCT scope FROM chunks`).Scan(&scope); err != nil {
 		t.Fatalf("select scope: %v", err)
 	}
-	if scope != "ecstasoy/pr-review-assistant" {
+	if scope != "ecstasoy/lgtm" {
 		t.Errorf("scope not lowercased on open: got %q", scope)
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
 // scriptedProvider 按调用次数返预设的 chunks；测试 ReAct 多轮场景用

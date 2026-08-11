@@ -1,4 +1,4 @@
-module github.com/ecstasoy/PR-Review-Assistant/backend
+module github.com/ecstasoy/LGTM/backend
 
 go 1.25.0
 
