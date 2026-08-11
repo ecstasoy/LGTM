@@ -53,3 +53,20 @@ func TestPostReview_RejectsUnknownModel(t *testing.T) {
 		t.Fatalf("unknown model 应 400，得到 %d", resp.StatusCode)
 	}
 }
+
+// /api/review 的 stage_models 里有未知模型时也 400（按阶段覆盖同样走白名单，不进 fetch / LLM）。
+func TestPostReview_RejectsUnknownStageModel(t *testing.T) {
+	srv := startTestServer(t, Deps{Models: testRegistry()})
+	body, _ := json.Marshal(map[string]any{
+		"url":          "https://github.com/o/r/pull/1",
+		"stage_models": map[string]string{"risks": "bogus"},
+	})
+	resp, err := http.Post(srv.URL+"/api/review", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("stage_models 含未知模型应 400，得到 %d", resp.StatusCode)
+	}
+}

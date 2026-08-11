@@ -104,7 +104,9 @@ func PostReview(d Deps) gin.HandlerFunc {
 
 		var body struct {
 			URL   string `json:"url"`
-			Model string `json:"model"` // L3：注册表 key；空=默认模型
+			Model string `json:"model"` // L3：注册表 key，应用到所有阶段；空=默认模型
+			// StageModels 按阶段覆盖（summary/risks/suggestions），优先级高于 Model；缺的阶段回退 Model 再回退部署默认
+			StageModels map[string]string `json:"stage_models"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(400, gin.H{"error": "invalid request body"})
@@ -116,19 +118,29 @@ func PostReview(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// L3 运行时选模型：model 为注册表 key（空=默认）。非空且不在白名单 → 拒绝（成本 / 安全闸）。
+		// L3 运行时选模型：每阶段取 stage_models[st] > model（应用到所有阶段）> 部署侧 L1 默认。
+		// 每个用户指定的 key 必须在白名单内（成本 / 安全闸）；任一非默认模型则绕过缓存
+		// （避免与默认结果串同一缓存槽，也不写入历史；模型维度入缓存键见「下一步」）。
 		model := strings.TrimSpace(body.Model)
-		if model != "" && d.Models != nil && !d.Models.Has(model) {
-			c.JSON(400, gin.H{"error": "未知模型"})
-			return
-		}
-		// 默认模型走缓存（读 + 写）；显式指定的非默认模型绕过缓存——避免与默认结果串同一缓存槽，
-		// 也不写入历史（无 schema 迁移的折中；模型维度入缓存键见「下一步」）。
-		useCache := model == "" || (d.Models != nil && model == d.Models.DefaultKey())
-		// 选中模型时应用到全部 stage；否则沿用部署侧的按阶段配置（L1）。
-		stageModels := d.StageModels
-		if model != "" {
-			stageModels = map[string]string{"summary": model, "risks": model, "suggestions": model}
+		stageModels := map[string]string{}
+		useCache := true
+		for _, st := range []string{"summary", "risks", "suggestions"} {
+			picked := strings.TrimSpace(body.StageModels[st])
+			if picked == "" {
+				picked = model // 回退到「应用到所有阶段」的选择
+			}
+			if picked == "" {
+				stageModels[st] = d.StageModels[st] // 回退部署侧 L1（空 → provider 默认）
+				continue
+			}
+			if d.Models != nil && !d.Models.Has(picked) {
+				c.JSON(400, gin.H{"error": "未知模型"})
+				return
+			}
+			stageModels[st] = picked
+			if d.Models == nil || picked != d.Models.DefaultKey() {
+				useCache = false
+			}
 		}
 
 		ctx := c.Request.Context()

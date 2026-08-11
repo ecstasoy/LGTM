@@ -1,9 +1,9 @@
 "use client";
 
-import { CornerDownLeft, ExternalLink, GitPullRequest, Sparkle } from "lucide-react";
+import { CornerDownLeft, ExternalLink, GitPullRequest, SlidersHorizontal, Sparkle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { ModelOption } from "@/lib/api";
+import { STAGES, type ModelOption, type StageKey } from "@/lib/api";
 
 // 示例 chip：用本仓自己的 PR（一定能访问 + 装了 LGTM App，可演示采纳按钮）
 // 早期 golang/go + fastapi/fastapi 因 token rate limit / 私权问题被移除
@@ -36,7 +36,16 @@ interface Props {
   models?: ModelOption[];
   model?: string;
   onModelChange?: (key: string) => void;
+  // L3 分阶段：perStage 开启时按阶段各选一个模型，否则用 model 统一
+  perStage?: boolean;
+  onTogglePerStage?: () => void;
+  stageModels?: Record<StageKey, string>;
+  onStageModelChange?: (stage: StageKey, key: string) => void;
 }
+
+// 下拉框统一样式（主选择器 + 分阶段小选择器共用）
+const selectCls =
+  "h-9 shrink-0 rounded-md border border-border bg-surface-2 px-2 text-xs text-text-2 outline-none hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 // UrlInputCard URL 输入条 + 示例 chips
 // 卡片样式：surface + border-strong + shadow-md（对齐原型）
@@ -48,6 +57,10 @@ export function UrlInputCard({
   models = [],
   model = "",
   onModelChange,
+  perStage = false,
+  onTogglePerStage,
+  stageModels,
+  onStageModelChange,
 }: Props) {
   const valid = isValidPrUrl(value);
   const showPicker = models.length > 1;
@@ -73,14 +86,14 @@ export function UrlInputCard({
             disabled={disabled}
             className="min-w-0 flex-1 border-none bg-transparent px-0.5 py-1.5 font-mono text-sm text-text outline-none placeholder:text-faint disabled:opacity-60"
           />
-          {showPicker ? (
+          {showPicker && !perStage ? (
             <select
               value={model}
               onChange={(e) => onModelChange?.(e.target.value)}
               disabled={disabled}
               aria-label="选择评审模型"
               title="选择评审模型"
-              className="h-9 shrink-0 rounded-md border border-border bg-surface-2 px-2 text-xs text-text-2 outline-none hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className={selectCls}
             >
               {models.map((m) => (
                 <option key={m.key} value={m.key}>
@@ -104,6 +117,46 @@ export function UrlInputCard({
           </button>
         </div>
       </form>
+
+      {showPicker ? (
+        <div className="mt-2.5">
+          <button
+            type="button"
+            onClick={onTogglePerStage}
+            disabled={disabled}
+            aria-pressed={perStage}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors disabled:opacity-50",
+              perStage ? "text-accent" : "text-muted hover:text-text-2",
+            )}
+          >
+            <SlidersHorizontal className="h-[13px] w-[13px]" aria-hidden />
+            {perStage ? "分阶段（摘要 / 风险 / 建议 各自选模型）" : "分阶段选择模型"}
+          </button>
+          {perStage ? (
+            <div className="mt-1.5 grid grid-cols-3 gap-2 rounded-lg border border-border bg-surface-2 p-2.5">
+              {STAGES.map((s) => (
+                <label key={s.key} className="flex flex-col gap-1 text-xs text-muted">
+                  {s.label}
+                  <select
+                    value={stageModels?.[s.key] ?? model}
+                    onChange={(e) => onStageModelChange?.(s.key, e.target.value)}
+                    disabled={disabled}
+                    aria-label={`${s.label}阶段的模型`}
+                    className={cn(selectCls, "w-full")}
+                  >
+                    {models.map((m) => (
+                      <option key={m.key} value={m.key}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
         <span className="whitespace-nowrap text-xs text-muted">试试：</span>

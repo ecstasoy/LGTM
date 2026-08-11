@@ -7,7 +7,7 @@ import { HeroBanner } from "@/components/landing/HeroBanner";
 import { RecentReviewsList } from "@/components/landing/RecentReviewsList";
 import { UrlInputCard } from "@/components/landing/UrlInputCard";
 import { useMe } from "@/lib/auth";
-import { getModels, type ModelOption } from "@/lib/api";
+import { getModels, STAGES, type ModelOption, type StageKey } from "@/lib/api";
 
 // HomePage 落地页。提交 URL → 导航 /review/streaming?url=<encoded>，流式渲染由 review 页面驱动。
 // 评审本身无登录门槛；登录解锁的是历史归档 / Toast 通知 / 写回 GitHub 这些。
@@ -19,22 +19,45 @@ export default function HomePage() {
   // L3：可选模型白名单（仅多模型时显示选择器）；默认选第一个（= 注册表默认）
   const [models, setModels] = useState<ModelOption[]>([]);
   const [model, setModel] = useState("");
+  // L3 分阶段：perStage 开启时按阶段各选一个；stageModels 默认与 model 同步
+  const [perStage, setPerStage] = useState(false);
+  const [stageModels, setStageModels] = useState<Record<StageKey, string>>({
+    summary: "",
+    risks: "",
+    suggestions: "",
+  });
 
   useEffect(() => {
     let cancelled = false;
     getModels().then((opts) => {
       if (cancelled) return;
       setModels(opts);
-      if (opts.length > 0) setModel(opts[0].key);
+      if (opts.length > 0) {
+        const k = opts[0].key;
+        setModel(k);
+        setStageModels({ summary: k, risks: k, suggestions: k });
+      }
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // 主下拉是「全部」：改它同时把三个阶段同步过去（用户可再展开分阶段微调）
+  function pickAll(key: string) {
+    setModel(key);
+    setStageModels({ summary: key, risks: key, suggestions: key });
+  }
+
   function start(target: string) {
     const params = new URLSearchParams({ url: target.trim() });
-    if (model) params.set("model", model);
+    if (perStage) {
+      for (const s of STAGES) {
+        if (stageModels[s.key]) params.set(`m_${s.key}`, stageModels[s.key]);
+      }
+    } else if (model) {
+      params.set("model", model);
+    }
     router.push(`/review/streaming?${params.toString()}`);
   }
 
@@ -49,7 +72,13 @@ export default function HomePage() {
         onSubmit={start}
         models={models}
         model={model}
-        onModelChange={setModel}
+        onModelChange={pickAll}
+        perStage={perStage}
+        onTogglePerStage={() => setPerStage((p) => !p)}
+        stageModels={stageModels}
+        onStageModelChange={(stage, key) =>
+          setStageModels((prev) => ({ ...prev, [stage]: key }))
+        }
       />
       {authenticated ? <RecentReviewsList /> : null}
 

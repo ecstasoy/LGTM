@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { getReview } from "@/lib/api";
+import { getReview, STAGES } from "@/lib/api";
 import { streamReview } from "@/lib/sse";
 import { friendlyError } from "@/lib/errors";
 import type { BudgetReport, File, PrMeta, Risk, ReviewDetail, Suggestion } from "@/lib/types";
@@ -60,7 +60,17 @@ function ReviewDetailPageContent({ id }: { id: string }) {
 
   const isStreaming = id === "streaming";
   const sourceURL = searchParams.get("url");
-  const sourceModel = searchParams.get("model") ?? undefined; // L3：运行时选中的模型 key
+  const sourceModel = searchParams.get("model") ?? undefined; // L3：运行时选中的模型 key（应用到所有阶段）
+  // L3 分阶段：m_summary / m_risks / m_suggestions 各阶段模型 key
+  const stageModelEntries = STAGES.map(
+    (s) => [s.key, searchParams.get(`m_${s.key}`)] as const,
+  );
+  const sourceStageModels = Object.fromEntries(
+    stageModelEntries.filter(([, v]) => v),
+  ) as Record<string, string>;
+  const hasStageModels = Object.keys(sourceStageModels).length > 0;
+  // effect 依赖用的稳定字符串（对象每次渲染都是新引用，不能直接进依赖数组）
+  const stageModelDep = stageModelEntries.map(([, v]) => v ?? "").join(",");
 
   // 统一状态形状：cached 模式一次填齐，streaming 模式逐步填
   const [pr, setPr] = useState<PrMeta | null>(null);
@@ -148,7 +158,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           setSummaryDone(true);
         },
         onDone: () => !cancelled && (setSummaryDone(true), setStreaming(false)),
-      }, controller.signal, sourceModel)
+      }, controller.signal, sourceModel, hasStageModels ? sourceStageModels : undefined)
         .catch((e) => {
           if (e instanceof DOMException && e.name === "AbortError") return;
           if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -189,7 +199,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
       cancelled = true;
       controller?.abort();
     };
-  }, [id, isStreaming, sourceURL, sourceModel, retryNonce]);
+  }, [id, isStreaming, sourceURL, sourceModel, stageModelDep, retryNonce]);
 
   // 重试：清掉错误与上一轮部分结果，bump retryNonce 触发取数 effect 重跑
   const retry = useCallback(() => {

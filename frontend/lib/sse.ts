@@ -84,11 +84,15 @@ export async function streamReview(
   cb: StreamCallbacks,
   signal?: AbortSignal,
   model?: string,
+  stageModels?: Record<string, string>,
 ): Promise<void> {
+  const payload: { url: string; model?: string; stage_models?: Record<string, string> } = { url };
+  if (model) payload.model = model;
+  if (stageModels && Object.keys(stageModels).length > 0) payload.stage_models = stageModels;
   const res = await fetch("/api/review", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(model ? { url, model } : { url }),
+    body: JSON.stringify(payload),
     signal,
   });
   if (!res.ok) {
