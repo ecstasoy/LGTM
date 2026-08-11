@@ -5,8 +5,8 @@ package prctx
 import (
 	"context"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
 // Context 结构化 prompt 输入。

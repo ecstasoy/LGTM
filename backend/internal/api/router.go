@@ -3,15 +3,15 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/api/middleware"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/memory"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/oauth"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/session"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/store"
+	"github.com/ecstasoy/LGTM/backend/internal/api/middleware"
+	"github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/memory"
+	"github.com/ecstasoy/LGTM/backend/internal/oauth"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/session"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // Deps 是路由 + handler 需要的所有依赖。

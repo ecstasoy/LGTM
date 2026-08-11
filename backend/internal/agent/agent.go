@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
 // ErrMaxStepsReached agent loop 达到 MaxSteps 仍未收敛（LLM 一直在调工具）。

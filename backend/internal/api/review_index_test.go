@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
 // stubIndexer 记录 UpsertMany 调用，便于 assert chunk 内容

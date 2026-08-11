@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/store"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // failPingStore 装饰 Store，把 Ping 改成报错；其他方法委托给 inner

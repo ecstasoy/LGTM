@@ -11,7 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/review"
+	"github.com/ecstasoy/LGTM/backend/internal/review"
 )
 
 // AdoptResponse POST /api/review/:id/comment/:idx 成功返回

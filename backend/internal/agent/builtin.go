@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
 // 四个 builtin tool：read_file / list_dir / grep_patches / search_repo

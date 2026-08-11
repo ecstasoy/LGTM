@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/oauth"
+	"github.com/ecstasoy/LGTM/backend/internal/oauth"
 )
 
 // PermsResponse GET /api/perms?owner=&repo= 返回字段

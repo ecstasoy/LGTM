@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prompts"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/prompts"
 )
 
 var allTemplates = []string{"summary.tmpl", "risks.tmpl", "suggestions.tmpl"}

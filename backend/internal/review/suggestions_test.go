@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
 
 // drainSuggestions 收完所有 event；返 suggestions / error message / done 标记。

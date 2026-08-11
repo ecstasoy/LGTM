@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/agent"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/agent"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
 // 验证 WireAgentSSE 三个 callback 都按 SSE 协议写帧

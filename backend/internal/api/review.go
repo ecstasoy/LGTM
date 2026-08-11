@@ -13,12 +13,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/review"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/store"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/review"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // indexMaxChunkChars 单 chunk 内容字符上限；超过截断

@@ -5,7 +5,7 @@
 //
 //	cd backend
 //	go run ./cmd/indexrepo \
-//	    --scope ecstasoy/PR-Review-Assistant \
+//	    --scope ecstasoy/LGTM \
 //	    --dir .. \
 //	    --db ./data/rag.db
 //
@@ -26,7 +26,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
 const (

@@ -13,17 +13,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/api"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/config"
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/index"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/memory"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/oauth"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/observability"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/prctx"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/session"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/store"
+	"github.com/ecstasoy/LGTM/backend/internal/api"
+	"github.com/ecstasoy/LGTM/backend/internal/config"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/memory"
+	"github.com/ecstasoy/LGTM/backend/internal/oauth"
+	"github.com/ecstasoy/LGTM/backend/internal/observability"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/session"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 func main() {

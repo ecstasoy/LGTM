@@ -13,7 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	gh "github.com/ecstasoy/PR-Review-Assistant/backend/internal/github"
+	gh "github.com/ecstasoy/LGTM/backend/internal/github"
 )
 
 // errFetcher always errors; lets handler tests verify the synchronous response

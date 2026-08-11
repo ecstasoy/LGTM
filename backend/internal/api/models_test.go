@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
 func testRegistry() *llm.Registry {

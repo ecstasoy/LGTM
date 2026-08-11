@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/agent"
-	"github.com/ecstasoy/PR-Review-Assistant/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/agent"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
 // WireAgentSSE 把 SSE writer 接到 Agent 的 callbacks：tool 调用 / text 增量
