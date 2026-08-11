@@ -14,7 +14,7 @@ GitHub App 安装后自动对 PR 进行评审的效果可以参考[这里](githu
 基本流程：
 
 1. 用 GitHub 登录。
-2. 粘贴公开 PR 链接，例如 `https://github.com/ecstasoy/PR-Review-Assistant/pull/93`。
+2. 粘贴公开 PR 链接，例如 `https://github.com/ecstasoy/LGTM/pull/93`。
 3. 等待 SSE 流式返回。摘要会边生成边显示，风险和建议阶段完成后一次性更新。
 
 评审页有三个视图：
@@ -71,13 +71,13 @@ make dev
 ```bash
 curl -N -X POST http://localhost:8080/api/review \
   -H 'Content-Type: application/json' \
-  -d '{"url":"https://github.com/ecstasoy/PR-Review-Assistant/pull/93"}'
+  -d '{"url":"https://github.com/ecstasoy/LGTM/pull/93"}'
 ```
 
 前端落地页目前默认有登录门槛。如果本地没有配置 GitHub OAuth，可以直接打开流式页测试 UI：
 
 ```text
-http://localhost:3000/review/streaming?url=https%3A%2F%2Fgithub.com%2Fecstasoy%2FPR-Review-Assistant%2Fpull%2F93
+http://localhost:3000/review/streaming?url=https%3A%2F%2Fgithub.com%2Fecstasoy%2FLGTM%2Fpull%2F93
 ```
 
 ### 接真实模型
@@ -133,7 +133,7 @@ RAG_DB_PATH=./data/rag.db
 
 ```bash
 cd backend
-go run ./cmd/indexrepo --scope ecstasoy/PR-Review-Assistant --dir .. --db ./data/rag.db --env .env
+go run ./cmd/indexrepo --scope ecstasoy/LGTM --dir .. --db ./data/rag.db --env .env
 ```
 
 容器部署时还有一条路径：`backend/entrypoint.sh` 会在 `RAG_SCOPE` 非空且 `/app/src` 存在时，后台执行 `/app/indexrepo` 做全仓预索引。Fly 配置里已经给本仓设置了 `RAG_SCOPE`。
