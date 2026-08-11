@@ -7,7 +7,7 @@ export function Footer() {
       <span>© ecstasoy 2026</span>
       <span className="mx-2 text-faint">·</span>
       <Link
-        href="https://github.com/ecstasoy/PR-Review-Assistant"
+        href="https://github.com/ecstasoy/LGTM"
         target="_blank"
         rel="noreferrer"
         className="hover:text-text"

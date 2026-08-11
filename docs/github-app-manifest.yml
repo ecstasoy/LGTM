@@ -6,8 +6,8 @@
 #
 # 字段说明对应：https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
 
-name: PR-Review-Assistant
-url: https://github.com/ecstasoy/PR-Review-Assistant
+name: LGTM
+url: https://github.com/ecstasoy/LGTM
 
 # 用户装好 App 后，跳转的地址（v3 主线④ G2 OAuth login flow 用）
 # 替换成你部署后的真实地址

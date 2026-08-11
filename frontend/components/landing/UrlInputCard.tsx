@@ -9,8 +9,8 @@ import { STAGES, type ModelOption, type StageKey } from "@/lib/api";
 // 早期 golang/go + fastapi/fastapi 因 token rate limit / 私权问题被移除
 const EXAMPLES = [
   {
-    label: "ecstasoy/PR-Review-Assistant",
-    url: "https://github.com/ecstasoy/PR-Review-Assistant/pull/93",
+    label: "ecstasoy/LGTM",
+    url: "https://github.com/ecstasoy/LGTM/pull/93",
     desc: "Go · webhook + slash command",
   },
   {

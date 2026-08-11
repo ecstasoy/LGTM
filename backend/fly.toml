@@ -56,7 +56,7 @@ primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg /
   # RAG_SCOPE 非空 → 容器 entrypoint 自动后台跑 indexrepo 扫 /app/src 全仓预索引
   # 真召回还需 EMBEDDING_API_KEY secret；缺则降级 mock（向量随机=等于关 RAG）
   RAG_DB_PATH = "/data/rag.db"
-  RAG_SCOPE = "ecstasoy/PR-Review-Assistant"
+  RAG_SCOPE = "ecstasoy/LGTM"
 
 [[vm]]
   cpu_kind = "shared"
