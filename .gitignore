@@ -36,6 +36,9 @@ go.work.sum
 # Build artifacts
 /backend/bin/
 /backend/dist/
+# Bare `go build ./cmd/X` drops the binary here instead of bin/
+/backend/server
+/backend/indexrepo
 *.sqlite
 *.sqlite-journal
 *.db
