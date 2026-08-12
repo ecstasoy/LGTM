@@ -60,13 +60,13 @@ export default function HistoryPage() {
   }, [nonce]);
 
   async function handleDelete(id: string, label: string) {
-    if (!window.confirm(t.history.confirmDelete(label))) return;
+    if (!window.confirm(t.reviewList.confirmDelete(label))) return;
     try {
       await deleteReview(id);
       setNonce((n) => n + 1);
     } catch (e) {
       window.alert(
-        t.history.deleteFailed(
+        t.reviewList.deleteFailed(
           friendlyError(
             e instanceof Error ? e.message : String(e),
             t,
@@ -185,10 +185,10 @@ function TableBody({
   t: Dict;
 }) {
   if (error) {
-    return <p className="px-4 py-6 text-center text-sm text-fail">{t.history.loadFailed(error)}</p>;
+    return <p className="px-4 py-6 text-center text-sm text-fail">{t.reviewList.loadFailed(error)}</p>;
   }
   if (items === null) {
-    return <p className="px-4 py-6 text-center text-sm text-muted">{t.history.loading}</p>;
+    return <p className="px-4 py-6 text-center text-sm text-muted">{t.reviewList.loading}</p>;
   }
   if (items.length === 0) {
     return (
@@ -254,7 +254,7 @@ function Row({
           <span className="text-faint">#{review.pr}</span>
         </code>
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm">{review.title || t.history.untitled}</span>
+          <span className="truncate text-sm">{review.title || t.reviewList.untitled}</span>
           {shouldShowLocaleNotice(review.locale, uiLocale) ? (
             <LocaleBadge locale={review.locale} />
           ) : null}
@@ -271,9 +271,9 @@ function Row({
             e.stopPropagation();
             onDelete(review.id, `${review.owner}/${review.repo}#${review.pr}`);
           }}
-          title={review.created_by ? t.history.deleteOwnTitle : t.history.deleteAnonymousTitle}
+          title={review.created_by ? t.reviewList.deleteOwnTitle : t.reviewList.deleteAnonymousTitle}
           className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-high-bg hover:text-high group-hover:opacity-100"
-          aria-label={t.history.deleteAriaLabel}
+          aria-label={t.reviewList.deleteAriaLabel}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
@@ -308,9 +308,9 @@ function formatRelative(iso: string, t: Dict): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const delta = (Date.now() - d.getTime()) / 1000;
-  if (delta < 60) return t.history.justNow;
-  if (delta < 3600) return t.history.minutesAgo(Math.floor(delta / 60));
-  if (delta < 86400) return t.history.hoursAgo(Math.floor(delta / 3600));
-  if (delta < 7 * 86400) return t.history.daysAgo(Math.floor(delta / 86400));
-  return d.toLocaleDateString(t.history.dateLocale, { month: "2-digit", day: "2-digit" });
+  if (delta < 60) return t.reviewList.justNow;
+  if (delta < 3600) return t.reviewList.minutesAgo(Math.floor(delta / 60));
+  if (delta < 86400) return t.reviewList.hoursAgo(Math.floor(delta / 3600));
+  if (delta < 7 * 86400) return t.reviewList.daysAgo(Math.floor(delta / 86400));
+  return d.toLocaleDateString(t.reviewList.dateLocale, { month: "2-digit", day: "2-digit" });
 }
