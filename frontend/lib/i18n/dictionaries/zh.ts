@@ -56,6 +56,22 @@ export const zh = {
     risks: "风险",
     suggestions: "建议",
   },
+  // Copy shared by every review list (landing recent list, history table); keep list-specific wording out.
+  reviewList: {
+    loading: "加载中…",
+    loadFailed: (error: string) => `加载失败：${error}`,
+    untitled: "(未命名)",
+    deleteOwnTitle: "删除你创建的评审",
+    deleteAnonymousTitle: "删除匿名遗留记录",
+    deleteAriaLabel: "删除评审",
+    confirmDelete: (label: string) => `确定删除评审「${label}」？操作不可撤销。`,
+    deleteFailed: (msg: string) => `删除失败：${msg}`,
+    justNow: "刚刚",
+    minutesAgo: (n: number) => `${n} 分钟前`,
+    hoursAgo: (n: number) => `${n} 小时前`,
+    daysAgo: (n: number) => `${n} 天前`,
+    dateLocale: "zh-CN",
+  },
   recentReviews: {
     title: "最近评审",
     viewAll: "查看全部",
