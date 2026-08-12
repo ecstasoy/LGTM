@@ -3,7 +3,8 @@
 import { CornerDownLeft, ExternalLink, GitPullRequest, SlidersHorizontal, Sparkle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { STAGES, type ModelOption, type StageKey } from "@/lib/api";
+import { STAGE_KEYS, type ModelOption, type StageKey } from "@/lib/api";
+import { useT } from "@/lib/i18n/context";
 
 // 示例 chip：用本仓自己的 PR（一定能访问 + 装了 LGTM App，可演示采纳按钮）
 // 早期 golang/go + fastapi/fastapi 因 token rate limit / 私权问题被移除
@@ -62,6 +63,7 @@ export function UrlInputCard({
   stageModels,
   onStageModelChange,
 }: Props) {
+  const t = useT();
   const valid = isValidPrUrl(value);
   const showPicker = models.length > 1;
 
@@ -79,8 +81,8 @@ export function UrlInputCard({
             type="text"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder="https://github.com/owner/repo/pull/123"
-            aria-label="GitHub Pull Request URL"
+            placeholder={t.landing.urlPlaceholder}
+            aria-label={t.landing.urlAriaLabel}
             aria-invalid={value.trim() !== "" && !valid}
             spellCheck={false}
             disabled={disabled}
@@ -91,8 +93,8 @@ export function UrlInputCard({
               value={model}
               onChange={(e) => onModelChange?.(e.target.value)}
               disabled={disabled}
-              aria-label="选择评审模型"
-              title="选择评审模型"
+              aria-label={t.landing.modelPickerLabel}
+              title={t.landing.modelPickerLabel}
               className={selectCls}
             >
               {models.map((m) => (
@@ -112,7 +114,7 @@ export function UrlInputCard({
             )}
           >
             <Sparkle className="h-[15px] w-[15px]" />
-            开始评审
+            {t.landing.submit}
             <CornerDownLeft className="h-[13px] w-[13px] opacity-80" />
           </button>
         </div>
@@ -131,18 +133,18 @@ export function UrlInputCard({
             )}
           >
             <SlidersHorizontal className="h-[13px] w-[13px]" aria-hidden />
-            {perStage ? "分阶段（摘要 / 风险 / 建议 各自选模型）" : "分阶段选择模型"}
+            {perStage ? t.landing.perStageOn : t.landing.perStageOff}
           </button>
           {perStage ? (
             <div className="mt-1.5 grid grid-cols-3 gap-2 rounded-lg border border-border bg-surface-2 p-2.5">
-              {STAGES.map((s) => (
-                <label key={s.key} className="flex flex-col gap-1 text-xs text-muted">
-                  {s.label}
+              {STAGE_KEYS.map((key) => (
+                <label key={key} className="flex flex-col gap-1 text-xs text-muted">
+                  {t.stages[key]}
                   <select
-                    value={stageModels?.[s.key] ?? model}
-                    onChange={(e) => onStageModelChange?.(s.key, e.target.value)}
+                    value={stageModels?.[key] ?? model}
+                    onChange={(e) => onStageModelChange?.(key, e.target.value)}
                     disabled={disabled}
-                    aria-label={`${s.label}阶段的模型`}
+                    aria-label={t.landing.stageModelAriaLabel(t.stages[key])}
                     className={cn(selectCls, "w-full")}
                   >
                     {models.map((m) => (
@@ -159,7 +161,7 @@ export function UrlInputCard({
       ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
-        <span className="whitespace-nowrap text-xs text-muted">试试：</span>
+        <span className="whitespace-nowrap text-xs text-muted">{t.landing.examplesLabel}</span>
         {EXAMPLES.map((ex) => (
           <button
             key={ex.url}

@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { getReview, STAGES } from "@/lib/api";
+import { getReview, STAGE_KEYS } from "@/lib/api";
 import { streamReview } from "@/lib/sse";
 import { friendlyError } from "@/lib/errors";
 import type { BudgetReport, File, PrMeta, Risk, ReviewDetail, Suggestion } from "@/lib/types";
@@ -62,8 +62,8 @@ function ReviewDetailPageContent({ id }: { id: string }) {
   const sourceURL = searchParams.get("url");
   const sourceModel = searchParams.get("model") ?? undefined; // L3：运行时选中的模型 key（应用到所有阶段）
   // L3 分阶段：m_summary / m_risks / m_suggestions 各阶段模型 key
-  const stageModelEntries = STAGES.map(
-    (s) => [s.key, searchParams.get(`m_${s.key}`)] as const,
+  const stageModelEntries = STAGE_KEYS.map(
+    (key) => [key, searchParams.get(`m_${key}`)] as const,
   );
   const sourceStageModels = Object.fromEntries(
     stageModelEntries.filter(([, v]) => v),
