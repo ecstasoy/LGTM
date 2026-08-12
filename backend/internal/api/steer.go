@@ -19,16 +19,16 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
 
-// 允许 steer 重跑的 stage 白名单。summary 重跑收益低（成本高 + 用户主要追问的是风险点 / 建议），暂不开放。
-// 实际 Stage 用 newStage 按阶段模型构造（与 mergeStages 同一套 L1 路由）。
+// Allowlist of stages a steer may rerun. Rerunning summary pays off poorly (expensive, and follow-ups are mostly about risks / suggestions), so it stays closed for now.
+// The actual Stage is built by newStage with that stage's model (the same L1 routing as mergeStages).
 var allowedSteerStages = map[string]bool{
 	"risks":       true,
 	"suggestions": true,
 }
 
-// buildAgentUserPrompt 把 prctx.Context 装到 agent 的 user prompt 里。
-// 与 stage 模板的核心差异：不要 JSON 输出指令；显式提示 L4 RAG 段是跨 PR 上下文。
-// L2 不内联（patch 体积大）—— agent 可调 read_file 按需取；这里只给 L1Meta（含文件名列表）和 L4 召回。
+// buildAgentUserPrompt packs a prctx.Context into the agent's user prompt.
+// Key difference from the stage templates: no JSON output instruction, and the L4 RAG section is explicitly flagged as cross-PR context.
+// L2 is not inlined (patches are large) — the agent can call read_file on demand; this gives only L1Meta (including the file list) and L4 recall.
 func buildAgentUserPrompt(pr gh.PullRequest, userQuery string, pCtx prctx.Context) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "PR：%s/%s#%d（%s）\n\n", pr.Owner, pr.Repo, pr.Number, pr.Title)
@@ -54,12 +54,12 @@ func buildAgentUserPrompt(pr gh.PullRequest, userQuery string, pCtx prctx.Contex
 
 // PostSteer POST /api/review/:id/steer
 //
-// 用户在会话视图底部 SteerComposer 输入引导（如 "重点看并发安全"），从 cached payload 重建 prctx，
-// 把引导文本 prepend 到 L1Meta，重新跑指定 stage（默认 risks）；SSE 推 `steered_risks_done` /
-// `steered_suggestions_done` 帧 + 终止 done。前端把结果合并到现有 state（替换而非追加）。
+// The user types a steer in the SteerComposer at the bottom of the session view (e.g. "focus on concurrency safety"); prctx is rebuilt from the cached payload,
+// the steer text is prepended to L1Meta, and the named stage is rerun (risks by default). SSE pushes a `steered_risks_done` /
+// `steered_suggestions_done` frame plus a terminating done. The frontend merges the result into existing state (replacing, not appending).
 //
-// 不重新 fetch GitHub：cached files 已经够；首轮的 L3 conventions 没存 cache，重跑时 L3 为空。
-// 这是一个 v2 折中：steer 质量略弱于首轮但响应快且不消耗 GitHub API 配额。
+// GitHub is not re-fetched: the cached files are enough. The first round's L3 conventions were never cached, so L3 is empty on a rerun.
+// A deliberate v2 trade-off: steer quality is slightly below the first round, but it responds fast and burns no GitHub API quota.
 func PostSteer(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Store == nil {
@@ -71,7 +71,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 		var body struct {
 			Text  string `json:"text"`
 			Stage string `json:"stage"`
-			Mode  string `json:"mode"` // "stage"（默认，重跑 risks/suggestions）/ "agent"（跑 ReAct loop + 工具调用）
+			Mode  string `json:"mode"` // "stage" (default, reruns risks/suggestions) / "agent" (runs the ReAct loop + tool calls)
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -90,7 +90,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be one of: stage, agent"})
 			return
 		}
-		// stage 字段在 mode=stage 时必填；agent 模式忽略
+		// stage is required when mode=stage; agent mode ignores it
 		stageKey := body.Stage
 		if stageKey == "" {
 			stageKey = "risks"
@@ -119,7 +119,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 从 cached payload 反向重建一个 PullRequest 给 LayeredBuilder
+		// rebuild a PullRequest from the cached payload to hand to LayeredBuilder
 		pr := gh.PullRequest{
 			Owner:     rec.Owner,
 			Repo:      rec.Repo,
@@ -136,14 +136,14 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			CI:        p.CI,
 			Checks:    p.Checks,
 			Files:     p.Files,
-			// Conventions 没存 cache；L3 跑出来为空，stage prompt 会少这一段
+			// Conventions were never cached, so L3 comes back empty and the stage prompt is missing that section
 		}
 
 		builder := d.Builder
 		if builder == nil {
 			builder = prctx.NewLayeredBuilder()
 		}
-		// P2: 用用户输入作 RAG query，让追问 / steer 召回更对题（而非默认的 PR 元信息）
+		// P2: use the user's input as the RAG query so follow-ups / steers recall more on-topic material (rather than the default PR metadata)
 		pCtx, err := builder.BuildWith(ctx, pr, prctx.BuildOptions{RAGQuery: text})
 		if err != nil {
 			slog.Error("steer build prctx", "err", err, "id", id)
@@ -151,7 +151,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 把用户引导 prepend 到 L1Meta，让 prompt 第一眼就看见引导意图
+		// prepend the user's steer to L1Meta so the prompt sees the intent first thing
 		pCtx.L1Meta = fmt.Sprintf("【用户引导】%s\n\n%s", text, pCtx.L1Meta)
 
 		// SSE headers
@@ -160,7 +160,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 		c.Header("Connection", "keep-alive")
 		c.Header("X-Accel-Buffering", "no")
 
-		// mode=agent：跑 ReAct loop + 工具调用；通过 WireAgentSSE 自动推 tool_call_start/done 帧
+		// mode=agent: run the ReAct loop + tool calls; WireAgentSSE pushes the tool_call_start/done frames automatically
 		if mode == "agent" {
 			reg := agent.NewRegistry()
 			scope := pr.Owner + "/" + pr.Repo
@@ -173,8 +173,8 @@ func PostSteer(d Deps) gin.HandlerFunc {
 				hasSearchRepo = true
 			}
 
-			// 取会话记忆：按 review_id 拉同一对话室之前几轮 user/assistant
-			// 错误 fail-soft 为 nil（memory 是增强不是依赖）；turns 顺序 = 时间序最旧在前
+			// load session memory: pull the previous user/assistant turns of this same room by review_id
+			// errors fail soft to nil (memory is an enhancement, not a dependency); turns are ordered oldest first
 			var priorTurns []memory.Turn
 			if d.Memory != nil {
 				if prior, gerr := d.Memory.Get(ctx, id); gerr != nil {
@@ -193,12 +193,12 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			a := &agent.Agent{
 				Provider: d.Provider,
 				Tools:    reg,
-				MaxSteps: 8, // 5 过紧；L4 召回不直接命中时给 agent 2-3 次工具迭代余地
+				MaxSteps: 8, // 5 is too tight; when L4 recall misses it leaves the agent 2-3 tool iterations of room
 			}
 			WireAgentSSE(a, c.Writer)
 
-			// 强引导：L4 already has RAG context → 优先据此直答，避免无脑调工具空转
-			// PR 沙盒工具 + 可选 search_repo（按 retriever 注入情况浮动）
+			// strong steer: L4 already has RAG context → answer from it directly rather than spinning on tool calls
+			// PR sandbox tools + optional search_repo (depending on whether a retriever was injected)
 			sysPrompt := "你是 code reviewer agent。回答 PR 相关问题。\n\n" +
 				"## 关键：先看「相关代码」段\n" +
 				"prompt 末尾「## 相关代码（跨文件 RAG 召回）」段已是基于用户问题语义召回的本仓库相关代码（可能来自本 PR 也可能来自 main 上未在本 PR 改动的文件）。" +
@@ -218,8 +218,8 @@ func PostSteer(d Deps) gin.HandlerFunc {
 				"用一段简洁中文文字回答（不要 JSON）。优先引用具体文件路径 + 行为，让读者能直接定位。"
 			userPrompt := buildAgentUserPrompt(pr, text, pCtx)
 
-			// 装载 messages：sys + 历史 (user/assistant 交替) + 当前 user
-			// 历史的 tool_calls / observation 不入；agent 需要时会重新调工具
+			// assemble messages: sys + history (alternating user/assistant) + the current user turn
+			// history tool_calls / observations are left out; the agent will call the tools again if it needs them
 			msgs := []llm.Message{{Role: "system", Content: sysPrompt}}
 			for _, t := range priorTurns {
 				msgs = append(msgs,
@@ -232,8 +232,8 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			result, err := a.Run(ctx, llm.Request{Messages: msgs})
 			if err != nil {
 				slog.Warn("steer agent run failed", "err", err, "steps", result.Steps)
-				// 仅当 agent 没产出任何文字时才推 error；有 Output 时下面 info 帧已能传达
-				// 让用户看到具体提示而非 "agent: max steps reached" 这种空话
+				// only push error when the agent produced no text at all; when there is Output the info frame below already conveys it
+				// shows the user something concrete instead of a non-answer like "agent: max steps reached"
 				if result.Output == "" {
 					hint := err.Error()
 					if errors.Is(err, agent.ErrMaxStepsReached) {
@@ -247,14 +247,14 @@ func PostSteer(d Deps) gin.HandlerFunc {
 					})
 				}
 			}
-			// 把 agent 最终输出作 info 帧推给前端（v1 简化：不试图 parse 成 risks/suggestions JSON）
+			// push the agent's final output to the frontend as an info frame (v1 simplification: no attempt to parse it into risks/suggestions JSON)
 			if result.Output != "" {
 				writeSSE(c.Writer, "info", map[string]string{
 					"message": fmt.Sprintf("Agent 完成（%d 步）：%s", result.Steps, result.Output),
 					"stage":   "agent",
 				})
-				// 写回记忆：text 是用户原始引导（不含 PR 上下文 / L4 召回），重新装载时 buildAgentUserPrompt 会再拼
-				// 只有产出非空才写，避免空回答污染历史
+				// write back to memory: text is the user's raw steer (no PR context / L4 recall), which buildAgentUserPrompt reassembles on the next load
+				// only written when the output is non-empty, so blank answers do not pollute history
 				if d.Memory != nil {
 					if mErr := d.Memory.Append(ctx, id, memory.Turn{
 						UserText:  text,
@@ -271,14 +271,14 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 默认 mode=stage：重跑 risks 或 suggestions stage
+		// default mode=stage: rerun the risks or suggestions stage
 		writeSSE(c.Writer, "info", map[string]string{
 			"message": fmt.Sprintf("正在按引导重跑 %s 阶段…", stageKey),
 			"stage":   stageKey,
 		})
 		c.Writer.Flush()
 
-		// 按阶段经注册表解析 (provider, model)（与 mergeStages 同一套路由）；stageKey 已过白名单校验
+		// resolve (provider, model) per stage through the registry (same routing as mergeStages); stageKey has already passed the allowlist check
 		prov, model := resolveProvider(d.Provider, d.Models, d.StageModels[stageKey])
 		stage, _ := newStage(stageKey, model)
 		events, err := stage.Run(ctx, pCtx, prov)
@@ -291,8 +291,8 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 把 stage 原帧名（risks_done / suggestions_done）转译成 steered_* 推给前端
-		// 错误 / done 帧直传
+		// translate the stage's own frame names (risks_done / suggestions_done) into steered_* for the frontend
+		// error / done frames pass through unchanged
 		c.Stream(func(w io.Writer) bool {
 			select {
 			case <-ctx.Done():
@@ -309,7 +309,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 				case "suggestions_done":
 					eventType = "steered_suggestions_done"
 				case "done":
-					return true // 跳过 stage 内部 terminal done；上层统一发
+					return true // skip the stage's internal terminal done; the layer above sends one
 				}
 				writeSSERaw(w, eventType, ev.Data)
 				return true

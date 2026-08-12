@@ -18,15 +18,15 @@ const (
 	maxListLimit     = 100
 )
 
-// riskCounts 按 severity 统计的风险数；落地"最近评审"卡 + 历史表格的红 / 黄 / 灰 pips 用。
+// riskCounts is the risk tally by severity; drives the red / yellow / grey pips on the landing "recent reviews" card and the history table.
 type riskCounts struct {
 	High   int `json:"high"`
 	Medium int `json:"medium"`
 	Low    int `json:"low"`
 }
 
-// reviewListItem /api/reviews 列表项；只含 meta + CI + risks 计数，不带完整 payload。
-// 给落地"最近评审"卡 + /history 密集表格用，所以体积最小化。
+// reviewListItem is one /api/reviews list entry: meta + CI + risk counts only, no full payload.
+// Used by the landing "recent reviews" card and the dense /history table, so it is kept as small as possible.
 type reviewListItem struct {
 	ID         string     `json:"id"`
 	Owner      string     `json:"owner"`
@@ -36,14 +36,14 @@ type reviewListItem struct {
 	Title      string     `json:"title,omitempty"`
 	CreatedAt  string     `json:"created_at"`
 	CI         string     `json:"ci,omitempty"`
-	Lang       string     `json:"lang,omitempty"` // PR 主语言（detectPrimaryLang 的结果）；/history 语言筛选用
-	Source     string     `json:"source,omitempty"` // "manual" / "webhook"；前端按此渲染 ⚡ chip
-	CreatedBy  string     `json:"created_by,omitempty"` // GitHub login；空 = 匿名遗留；前端用来 gate 删除按钮
+	Lang       string     `json:"lang,omitempty"` // the PR's primary language (what detectPrimaryLang returned); used by the /history language filter
+	Source     string     `json:"source,omitempty"` // "manual" / "webhook"; the frontend renders the ⚡ chip from this
+	CreatedBy  string     `json:"created_by,omitempty"` // GitHub login; empty = anonymous leftover; the frontend gates the delete button on it
 	RiskCounts riskCounts `json:"risk_counts"`
 }
 
-// reviewDetail /api/reviews/:id 详情；完整透出 cachedPayload，
-// 给评审页顶栏 + 三视图渲染（review 页缓存秒回路径不再需要回 GitHub 拉 meta）。
+// reviewDetail is /api/reviews/:id: the full cachedPayload, exposed as-is,
+// for the review page top bar and the three views (the cached instant-load path no longer has to go back to GitHub for meta).
 type reviewDetail struct {
 	reviewListItem
 	Author      string          `json:"author,omitempty"`
@@ -55,15 +55,15 @@ type reviewDetail struct {
 	PRCreatedAt time.Time       `json:"pr_created_at,omitzero"`
 	Stats       gh.Stats        `json:"stats,omitzero"`
 	Checks      []gh.Check      `json:"checks,omitempty"`
-	Files        []gh.File            `json:"files,omitempty"` // 给 Diff 视图渲染用；list 端不返该大字段
+	Files        []gh.File            `json:"files,omitempty"` // for rendering the Diff view; the list endpoint omits this large field
 	Summary      string               `json:"summary"`
 	Risks        json.RawMessage      `json:"risks,omitempty"`
 	Suggestions  json.RawMessage      `json:"suggestions,omitempty"`
 	BudgetReport *budgetReportPayload `json:"budget_report,omitempty"`
 }
 
-// countRisksBySeverity 解析 risks_done event raw JSON，按 severity 分组计数。
-// 解析失败返零值（容错于格式异常的旧缓存）。
+// countRisksBySeverity parses the raw JSON of the risks_done event and counts by severity.
+// Returns the zero value on a parse failure (tolerates malformed older cache entries).
 func countRisksBySeverity(raw json.RawMessage) riskCounts {
 	if len(raw) == 0 {
 		return riskCounts{}
@@ -88,22 +88,22 @@ func countRisksBySeverity(raw json.RawMessage) riskCounts {
 	return c
 }
 
-// ListReviews GET /api/reviews?limit=N — 历史评审列表，按 created_at DESC。
-// 未配 Store 时返 503 而非 200 空列表，让前端能区分"没有历史"和"功能未启用"。
-// 可见性：
-//   - 必须登录（匿名访客 401）
-//   - 已登录用户 → 只看自己创建的记录
-//   - 匿名提交的记录（UserID=nil）：不出现在任何人的列表里，但凭 review URL 仍可直接访问详情
+// ListReviews GET /api/reviews?limit=N — review history, ordered by created_at DESC.
+// With no Store configured it returns 503 rather than an empty 200, so the frontend can tell "no history" from "feature not enabled".
+// Visibility:
+// - login required (anonymous visitors get 401)
+// - a logged-in user sees only the records they created
+// - anonymously submitted records (UserID=nil) appear in nobody's list, but the detail stays reachable via the review URL
 //
-// 设计：v2 后评审本身不要求登录（匿名也能评），但匿名记录无 owner 不该出现在任何"历史"语义里
-// dev / unit tests 无 Sessions 时 fallback：放行匿名访问 + 列出全部（含 nil UserID），方便本地调试
+// Rationale: past v2 the review itself will not require login (anonymous reviews stay possible), but an ownerless anonymous record has no business in anything called "history"
+// Fallback for dev / unit tests with no Sessions: allow anonymous access and list everything (including nil UserID), which makes local debugging easier
 func ListReviews(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Store == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "history disabled: store not configured"})
 			return
 		}
-		// 强制登录：列表里有 PR title / repo / risk 这类内容，不该对匿名访客暴露任何人的提交
+		// login required: the list carries PR title / repo / risk content and should expose nobody's submissions to an anonymous visitor
 		s := CurrentSession(c)
 		if d.Sessions != nil && s == nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录后查看评审历史"})
@@ -114,7 +114,7 @@ func ListReviews(d Deps) gin.HandlerFunc {
 
 		var records []*store.Record
 		if s != nil {
-			// 登录用户：仅自己创建的；匿名记录从列表中完全隐去
+			// logged-in user: only their own records; anonymous records are hidden from the list entirely
 			mine, err := d.Store.List(ctx, &s.Login, limit)
 			if err != nil {
 				slog.Error("list reviews (mine)", "err", err)
@@ -123,7 +123,7 @@ func ListReviews(d Deps) gin.HandlerFunc {
 			}
 			records = mine
 		} else {
-			// dev fallback：无 Sessions 配置时返全部（含匿名），方便本地调试
+			// dev fallback: with no Sessions configured, return everything (including anonymous) for easier local debugging
 			all, err := d.Store.List(ctx, nil, limit)
 			if err != nil {
 				slog.Error("list reviews (dev fallback)", "err", err)
@@ -145,7 +145,7 @@ func ListReviews(d Deps) gin.HandlerFunc {
 			if r.UserID != nil {
 				it.CreatedBy = *r.UserID
 			}
-			// title / ci / risks 计数从 payload 解出；解析失败保留零值（旧缓存兼容）
+			// title / ci / risk counts come out of the payload; a parse failure leaves the zero values (older cache entries still work)
 			var p cachedPayload
 			if jerr := json.Unmarshal(r.Payload, &p); jerr == nil {
 				it.Title = p.Title
@@ -160,13 +160,13 @@ func ListReviews(d Deps) gin.HandlerFunc {
 	}
 }
 
-// DeleteReview DELETE /api/reviews/:id — 删一条评审记录
-// 权限：
-//   - 必须已登录
-//   - record.UserID == nil（匿名遗留）→ 任何登录用户能删（兼容 v1）
-//   - record.UserID 非空 → 只有 owner 自己能删
+// DeleteReview DELETE /api/reviews/:id — delete one review record
+// Permissions:
+// - login required
+// - record.UserID == nil (anonymous leftover) → any logged-in user may delete it (v1 compatibility)
+// - record.UserID non-empty → only the owner may delete it
 //
-// 不级联删 RAG chunks（chunks 按 owner/repo 共享，删 review 不该影响别的）
+// RAG chunks are not cascaded (chunks are shared per owner/repo; deleting a review should not affect others)
 func DeleteReview(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Store == nil {
@@ -188,7 +188,7 @@ func DeleteReview(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
 			return
 		}
-		// 非匿名遗留 → 只 owner 能删
+		// not an anonymous leftover → owner only
 		if rec.UserID != nil && *rec.UserID != s.Login {
 			c.JSON(http.StatusForbidden, gin.H{"error": "只能删除你创建的评审"})
 			return
@@ -197,8 +197,8 @@ func DeleteReview(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// 顺手清掉 agent 追问会话记忆；避免 7 天孤儿驻留 Redis
-		// 失败仅 warn——store 已删完整事务，memory 残留只是占点空间
+		// clear the agent follow-up session memory while we are here, so no orphan lingers in Redis for 7 days
+		// failures only warn — the store transaction already completed, and leftover memory just takes up a little space
 		if d.Memory != nil {
 			if mErr := d.Memory.Reset(c.Request.Context(), id); mErr != nil {
 				slog.Warn("delete review: reset memory failed", "err", mErr, "id", id)
@@ -208,7 +208,7 @@ func DeleteReview(d Deps) gin.HandlerFunc {
 	}
 }
 
-// GetReview GET /api/reviews/:id — 按 id 取详情；payload 解析失败按 500 暴露而非降级返"空 review"。
+// GetReview GET /api/reviews/:id — fetch a detail by id; a payload parse failure surfaces as a 500 rather than degrading to an "empty review".
 func GetReview(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Store == nil {
@@ -232,8 +232,8 @@ func GetReview(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "corrupted cache payload"})
 			return
 		}
-		// 可见性校验：匿名遗留（UserID==nil）任何人都能看；UserID 非空只有 owner 看
-		// 防 URL 猜 ID 偷看别人的私密 review
+		// visibility check: an anonymous leftover (UserID==nil) is visible to anyone; a non-empty UserID is owner-only
+		// keeps someone from guessing an ID in the URL and peeking at another person's private review
 		if rec.UserID != nil {
 			sess := CurrentSession(c)
 			if sess == nil || sess.Login != *rec.UserID {
@@ -278,7 +278,7 @@ func GetReview(d Deps) gin.HandlerFunc {
 	}
 }
 
-// parseLimit 把 query "limit" 解析为 [1, maxListLimit] 内的整数；非法或缺省返 defaultListLimit。
+// parseLimit parses the "limit" query into an integer in [1, maxListLimit]; invalid or absent returns defaultListLimit.
 func parseLimit(s string) int {
 	if s == "" {
 		return defaultListLimit

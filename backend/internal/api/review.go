@@ -21,16 +21,16 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// indexMaxChunkChars 单 chunk 内容字符上限；超过截断
-// embedding API 多数模型上限 8192 token≈30K 字符，留余量
+// indexMaxChunkChars caps a single chunk's content length; anything longer is truncated
+// most embedding models cap around 8192 tokens ≈ 30K chars, so leave headroom
 const indexMaxChunkChars = 8000
 
-// splitPatchToHunks 把 unified diff patch 按 `@@ ` hunk 头切成独立片段；每片以 @@ 开头
-// 没 @@ 头时（罕见：合并后的预处理）退回整 patch 作单 hunk
-// 召回粒度从"一文件一 chunk"细化到"一 hunk 一 chunk"，让 cosine 分更准（噪音少）
+// splitPatchToHunks splits a unified diff patch at each `@@ ` hunk header; every fragment starts with @@
+// with no @@ header (rare: post-merge preprocessing) it falls back to the whole patch as one hunk
+// retrieval granularity goes from one chunk per file to one chunk per hunk, sharpening cosine scores (less noise)
 func splitPatchToHunks(patch string) []string {
 	if !strings.Contains(patch, "@@ ") {
-		// fallback：当作单 hunk；空 patch 由 caller 提前 skip
+		// fallback: treat as a single hunk; empty patches are skipped earlier by the caller
 		if strings.TrimSpace(patch) == "" {
 			return nil
 		}
@@ -52,10 +52,10 @@ func splitPatchToHunks(patch string) []string {
 	return hunks
 }
 
-// indexPRChunks 把本次 PR 的 file patches 按 hunk 切 chunk 同步写索引
-// scope = "owner/repo"；同 (scope,path,idx) ON CONFLICT 覆盖 → 重复评同 PR 不会重复 embed
-// idx = 同 path 下 hunk 序号（从 0 开始），让多 hunk 文件不互相覆盖
-// 失败仅 warn 不阻断评审；NoopIndexer 直接 no-op 无 API 调用
+// indexPRChunks splits this PR's file patches into hunk chunks and writes them to the index synchronously
+// scope = "owner/repo"; the same (scope,path,idx) is overwritten ON CONFLICT, so re-reviewing a PR does not re-embed
+// idx = hunk ordinal within a path (0-based), so multi-hunk files do not overwrite each other
+// failures only warn, never block the review; NoopIndexer is a no-op with no API calls
 func indexPRChunks(ctx context.Context, idx index.Indexer, pr gh.PullRequest) {
 	if _, isNoop := idx.(index.NoopIndexer); isNoop {
 		return
@@ -89,12 +89,12 @@ func indexPRChunks(ctx context.Context, idx index.Indexer, pr gh.PullRequest) {
 	slog.Info("indexed PR chunks", "scope", scope, "files", len(pr.Files), "chunks", len(chunks))
 }
 
-// PostReview 接收 { url }，先用 JSON 处理预检错误；
-// 成功后切到 text/event-stream，按帧推送各 stage 事件。
+// PostReview takes { url }, reporting precondition errors as JSON first;
+// once past those it switches to text/event-stream and pushes one frame per stage event.
 func PostReview(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 评审本身不要登录门槛——demo 零摩擦优先；防滥用靠 expensive rate limit 中间件 + head_sha 缓存
-		// 登录用户的 review 归档到名下（per-user 历史 + 删除）；匿名 review 不写 store（不污染列表）
+		// reviewing has no login gate — zero-friction demo first; abuse is handled by the expensive rate limit middleware + head_sha cache
+		// a logged-in user's review is archived under their account (per-user history + delete); anonymous reviews skip the store so they do not pollute the list
 		var creatorLogin string
 		if d.Sessions != nil {
 			if s := CurrentSession(c); s != nil {
@@ -104,8 +104,8 @@ func PostReview(d Deps) gin.HandlerFunc {
 
 		var body struct {
 			URL   string `json:"url"`
-			Model string `json:"model"` // L3：注册表 key，应用到所有阶段；空=默认模型
-			// StageModels 按阶段覆盖（summary/risks/suggestions），优先级高于 Model；缺的阶段回退 Model 再回退部署默认
+			Model string `json:"model"` // L3: registry key applied to every stage; empty = default model
+			// StageModels overrides per stage (summary/risks/suggestions) and outranks Model; a missing stage falls back to Model, then to the deployment default
 			StageModels map[string]string `json:"stage_models"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
@@ -118,19 +118,19 @@ func PostReview(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// L3 运行时选模型：每阶段取 stage_models[st] > model（应用到所有阶段）> 部署侧 L1 默认。
-		// 每个用户指定的 key 必须在白名单内（成本 / 安全闸）；任一非默认模型则绕过缓存
-		// （避免与默认结果串同一缓存槽，也不写入历史；模型维度入缓存键见「下一步」）。
+		// L3 runtime model choice: each stage resolves stage_models[st] > model (applied to every stage) > deployment-side L1 default.
+		// every user-supplied key must be on the allowlist (cost / safety gate); any non-default model bypasses the cache
+		// (so it cannot share a cache slot with the default result, and it is not archived; folding the model into the cache key is future work).
 		model := strings.TrimSpace(body.Model)
 		stageModels := map[string]string{}
 		useCache := true
 		for _, st := range []string{"summary", "risks", "suggestions"} {
 			picked := strings.TrimSpace(body.StageModels[st])
 			if picked == "" {
-				picked = model // 回退到「应用到所有阶段」的选择
+				picked = model // fall back to the "apply to every stage" choice
 			}
 			if picked == "" {
-				stageModels[st] = d.StageModels[st] // 回退部署侧 L1（空 → provider 默认）
+				stageModels[st] = d.StageModels[st] // fall back to the deployment-side L1 (empty → provider default)
 				continue
 			}
 			if d.Models != nil && !d.Models.Has(picked) {
@@ -161,17 +161,17 @@ func PostReview(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// SSE 头：必须在首次 Write 之前设
+		// SSE headers: must be set before the first Write
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
-		c.Header("X-Accel-Buffering", "no") // 关掉 nginx / 反代缓冲
+		c.Header("X-Accel-Buffering", "no") // turn off nginx / reverse-proxy buffering
 
-		// 首帧：PR meta —— 让前端立刻拿到完整顶栏所需字段（CI 圆点 / 作者 / 状态 / 体量 / 分支）
+		// first frame: PR meta — gives the frontend every field the top bar needs right away (CI dot / author / state / size / branch)
 		writeSSE(c.Writer, "pr", prMetaPayload(pr, url))
 		c.Writer.Flush()
 
-		// 空 PR 短路：没有可评审的文件改动时，不跑 LLM，直接发 info + done
+		// empty PR short-circuit: with no reviewable file changes, skip the LLM and send info + done directly
 		if len(pr.Files) == 0 {
 			writeSSE(c.Writer, "info", map[string]string{"message": "该 PR 无可评审的文件改动"})
 			writeSSE(c.Writer, "done", map[string]any{})
@@ -179,12 +179,12 @@ func PostReview(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 文件列表：让前端立即拿到 Diff 视图所需的文件树 + raw patch，无需等 stage
+		// file list: gives the frontend the file tree + raw patch the Diff view needs, without waiting on a stage
 		writeSSE(c.Writer, "files", pr.Files)
 		c.Writer.Flush()
 
-		// 缓存命中：同 (owner, repo, pr, head_sha) 有完整结果直接回放，跳过 LLM
-		// 非默认模型 useCache=false → 跳过回放，强制按选中模型重跑
+		// cache hit: a complete result for the same (owner, repo, pr, head_sha) is replayed as-is, skipping the LLM
+		// a non-default model sets useCache=false → skip the replay and force a rerun on the chosen model
 		if useCache && d.Store != nil {
 			if rec, gerr := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA); gerr != nil {
 				slog.Warn("cache get failed; falling through to stages", "err", gerr)
@@ -201,8 +201,8 @@ func PostReview(d Deps) gin.HandlerFunc {
 			}
 		}
 
-		// B4 RAG 同步索引：把本次 PR 的 patches 切 chunks 入库 → Build 时 L4 retrieve 能命中本仓库内容
-		// 失败仅 warn（embedding API 抖动 / 配额超），不影响整体评审
+		// RAG indexing, inline: this PR's patches are split into chunks and stored, so L4 retrieve can hit this repo's own content at Build time
+		// failures only warn (embedding API flake / quota) and do not affect the review
 		if d.Indexer != nil {
 			indexPRChunks(ctx, d.Indexer, pr)
 		}
@@ -222,15 +222,15 @@ func PostReview(d Deps) gin.HandlerFunc {
 			slog.Warn("prctx dropped large files", "files", pCtx.BudgetReport.Dropped, "limit", pCtx.BudgetReport.TokenLimit)
 		}
 		budget := toBudgetPayload(pCtx.BudgetReport)
-		// 在跑 LLM 前发预算帧，让前端会话视图可以立刻把上下文步骤切到"已完成"+显示真实 L1/L2/L3/L4
+		// send the budget frame before running the LLM, so the session view can flip the context steps to "done" and show the real L1/L2/L3/L4
 		writeSSE(c.Writer, "budget_report", budget)
 		c.Writer.Flush()
-		// per-stage RAG query：risks/suggestions 重算 L4（用不同 query），summary 用 baseCtx
-		// 多两次 retrieve 调用换更对题的召回；首字节延迟代价 < 200ms
+		// per-stage RAG query: risks/suggestions recompute L4 with their own query, summary reuses baseCtx
+		// two extra retrieve calls buy more on-topic recall; the cost to first byte is < 200ms
 		ctxByStage := buildPerStageContexts(ctx, builder, pr, pCtx)
 		merged := mergeStages(ctx, ctxByStage, d.Provider, d.Models, stageModels)
 
-		// 边推流边收集供后续 cache 写入；stage 任一报错则不写缓存（避免缓存半残结果）
+		// collect while streaming so the result can be cached afterwards; any stage error skips the cache write (never cache a half-finished result)
 		var (
 			summaryBuf       strings.Builder
 			risksData        json.RawMessage
@@ -245,8 +245,8 @@ func PostReview(d Deps) gin.HandlerFunc {
 				if !ok {
 					if useCache && d.Store != nil && !stageErrObserved && risksData != nil && suggestionsData != nil {
 						if id := persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "manual", creatorLogin); id != "" {
-							// 让流式页前端拿到 ULID 启用「💬 评论 / ✅ 提交 / SteerComposer 追问」按钮
-							// （没这帧前端只能等用户回首页点列表条目）
+							// lets the streaming page enable the 💬 comment / ✅ commit / SteerComposer follow-up buttons once it has the ULID
+							// (without this frame the frontend can only wait for the user to go back and click the list entry)
 							raw, _ := json.Marshal(map[string]string{"id": id})
 							writeSSERaw(w, "review_id", raw)
 						}
@@ -275,8 +275,8 @@ func PostReview(d Deps) gin.HandlerFunc {
 	}
 }
 
-// budgetReportPayload 分层 token 预算 SSE 帧 + 缓存 payload 共用形状。
-// 与 prctx.BudgetReport 同字段但带 snake_case json tag，避免把内部 pkg 字段名暴露给传输层。
+// budgetReportPayload is the shape shared by the layered token budget SSE frame and the cache payload.
+// Same fields as prctx.BudgetReport but with snake_case json tags, so internal package field names stay out of the transport layer.
 type budgetReportPayload struct {
 	TokenLimit int      `json:"token_limit"`
 	UsedL1     int      `json:"used_l1"`
@@ -286,7 +286,7 @@ type budgetReportPayload struct {
 	Dropped    []string `json:"dropped,omitempty"`
 }
 
-// toBudgetPayload 把 prctx.BudgetReport 转成 API 形状；零值安全。
+// toBudgetPayload converts a prctx.BudgetReport into the API shape; safe on the zero value.
 func toBudgetPayload(b prctx.BudgetReport) *budgetReportPayload {
 	return &budgetReportPayload{
 		TokenLimit: b.TokenLimit,
@@ -298,8 +298,8 @@ func toBudgetPayload(b prctx.BudgetReport) *budgetReportPayload {
 	}
 }
 
-// prMetaPayload 把 PR meta 打包成 SSE pr event 的 data。
-// 同时被 handler（首帧）和 detail endpoint（缓存命中后给前端兜底头部）共用同一形状。
+// prMetaPayload packs PR meta into the data of the SSE pr event.
+// Shared by the handler (first frame) and the detail endpoint (header fallback after a cache hit).
 func prMetaPayload(pr gh.PullRequest, sourceURL string) map[string]any {
 	payload := map[string]any{
 		"id":            pr.HeadSHA,
@@ -325,12 +325,12 @@ func prMetaPayload(pr gh.PullRequest, sourceURL string) map[string]any {
 	return payload
 }
 
-// persistReview 把本次评审序列化后写入 store；缓存写失败仅记日志，不影响响应。
-// 用 context.Background() 与请求生命周期解耦：写缓存时客户端可能已断开。
-// 返 ID 让 caller emit SSE review_id 帧（前端在流式页面拿到 ULID 后启用 adopt 按钮 / SteerComposer / agent 追问）
-// source 标记触发来源："manual"（用户粘 URL）/"webhook"（GitHub 推 PR 自动评）
-// createdByLogin GitHub login（manual=当前登录用户 或 "" 匿名；webhook=PR 作者，恒非空）
-// 匿名记录（UserID=nil）：可凭 ID URL 访问 + 走缓存命中加速；从 ListReviews 隐去避免污染历史
+// persistReview serializes this review into the store; a write failure is only logged and does not affect the response.
+// It uses context.Background() to decouple from the request lifecycle: the client may already be gone when the write happens.
+// Returns the ID so the caller can emit the SSE review_id frame (with the ULID the streaming page enables the adopt button / SteerComposer / agent follow-up)
+// source marks what triggered the review: "manual" (user pasted a URL) / "webhook" (GitHub pushed a PR and it was auto-reviewed)
+// createdByLogin is the GitHub login (manual = the logged-in user, or "" when anonymous; webhook = the PR author, always non-empty)
+// anonymous records (UserID=nil) stay reachable by ID URL and still hit the cache, but are hidden from ListReviews so they do not pollute history
 func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, suggestions json.RawMessage, budget *budgetReportPayload, source string, createdByLogin string) string {
 	if source == "" {
 		source = "manual"
@@ -367,8 +367,8 @@ func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, sugg
 		HeadSHA:  pr.HeadSHA,
 		Payload:  payload,
 	}
-	// UserID 非空字符串 → 真 owner（per-user 可见性 + delete 时校验）
-	// 空 → 匿名遗留（任何登录用户都能删，兼容 v1 旧记录）
+	// a non-empty UserID string → a real owner (per-user visibility + ownership check on delete)
+	// empty → an anonymous leftover (any logged-in user may delete it; kept for v1 records)
 	if createdByLogin != "" {
 		rec.UserID = &createdByLogin
 	}
@@ -379,11 +379,11 @@ func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, sugg
 	return rec.ID
 }
 
-// stageRAGQueryFor 不同 stage 用不同 RAG query；空返回 = caller fallback 到默认 L1Meta。
-// 设计：
-//   - summary 看的是全局摘要，PR meta 已经够好；不覆盖
-//   - risks 关注 bug/race/security，query 引导召回相关风险代码
-//   - suggestions 关注重构/优化，query 引导召回相关 patterns
+// stageRAGQueryFor gives each stage its own RAG query; an empty return means the caller falls back to the default L1Meta.
+// Rationale:
+// - summary wants a global overview and PR meta is already good enough, so it is not overridden
+// - risks cares about bugs/races/security, so the query steers recall toward related risky code
+// - suggestions cares about refactoring/optimization, so the query steers recall toward related patterns
 func stageRAGQueryFor(name string, pr gh.PullRequest) string {
 	switch name {
 	case "risks":
@@ -395,7 +395,7 @@ func stageRAGQueryFor(name string, pr gh.PullRequest) string {
 	}
 }
 
-// summarizePRFiles 把改动文件 path 压成一行短串作 RAG query 后缀；只取前 8 个免过长
+// summarizePRFiles squashes changed file paths into a one-line suffix for the RAG query; capped at the first 8 to keep it short
 func summarizePRFiles(files []gh.File) string {
 	const maxN = 8
 	paths := make([]string, 0, maxN)
@@ -408,8 +408,8 @@ func summarizePRFiles(files []gh.File) string {
 	return strings.Join(paths, ", ")
 }
 
-// buildPerStageContexts 为每个 stage 准备 prctx.Context；summary 直接复用 base，risks/suggestions 用各自 query 重算
-// 重算失败时回退 base —— RAG 错误不应阻断评审
+// buildPerStageContexts prepares a prctx.Context per stage; summary reuses base, risks/suggestions recompute with their own query
+// on failure it falls back to base — a RAG error should never block the review
 func buildPerStageContexts(
 	ctx context.Context,
 	builder prctx.Builder,
@@ -436,8 +436,8 @@ func buildPerStageContexts(
 	return out
 }
 
-// newStage 按 name 造对应 review.Stage 并注入按阶段模型（model 空串走 provider 默认）。
-// ok=false 表示未知 stage 名。供 steer 重跑路径复用同一套按阶段模型路由。
+// newStage builds the review.Stage matching name and injects that stage's model (an empty model means the provider default).
+// ok=false means the stage name is unknown. The steer rerun path reuses this same per-stage model routing.
 func newStage(name, model string) (review.Stage, bool) {
 	switch name {
 	case "summary":
@@ -451,14 +451,14 @@ func newStage(name, model string) (review.Stage, bool) {
 	}
 }
 
-// mergeStages 并发跑 summary + risks + suggestions，把各自的事件归并到一个 channel。
-// 任一 stage 失败会发一帧 error event 而非中止整条流。
-// ctxByStage 按 Stage.Name() 选 prctx.Context；缺失 key 回退到 ctxByStage["summary"]
+// mergeStages runs summary + risks + suggestions concurrently and merges their events onto one channel.
+// A failing stage emits one error event rather than aborting the whole stream.
+// ctxByStage is keyed by Stage.Name(); a missing key falls back to ctxByStage["summary"]
 func mergeStages(ctx context.Context, ctxByStage map[string]prctx.Context, def llm.Provider, models *llm.Registry, stageModels map[string]string) <-chan review.Event {
 	merged := make(chan review.Event, 16)
 	var wg sync.WaitGroup
 
-	// 每个 stage 经注册表解析自己的 (provider, model)；注册表为 nil 时回退默认 provider（兼容旧调用 / 测试）
+	// each stage resolves its own (provider, model) through the registry; a nil registry falls back to the default provider (kept for older callers / tests)
 	names := []string{"summary", "risks", "suggestions"}
 	fallback := ctxByStage["summary"]
 	wg.Add(len(names))
@@ -479,8 +479,8 @@ func mergeStages(ctx context.Context, ctxByStage map[string]prctx.Context, def l
 	return merged
 }
 
-// resolveProvider 选 stage 的 provider + model：注册表非 nil 时经它解析（支持跨供应商路由），
-// 否则回退默认 provider + 把 key 当原始模型名（L1 行为；注册表缺省 / 单元测试时兼容）。
+// resolveProvider picks a stage's provider + model: with a non-nil registry it resolves through it (cross-provider routing),
+// otherwise it falls back to the default provider and treats the key as a raw model name (L1 behaviour; kept for a missing registry / unit tests).
 func resolveProvider(def llm.Provider, reg *llm.Registry, key string) (llm.Provider, string) {
 	if reg != nil {
 		return reg.Resolve(key)
@@ -488,8 +488,8 @@ func resolveProvider(def llm.Provider, reg *llm.Registry, key string) (llm.Provi
 	return def, key
 }
 
-// forwardStage 跑一个 stage，把它的事件转发到 merged；ctx 取消时安全退出。
-// stage 同步失败时发一帧 error 让前端能感知，而非默默丢失。
+// forwardStage runs one stage and forwards its events onto merged; it exits cleanly when ctx is cancelled.
+// A synchronous stage failure emits one error event so the frontend notices, instead of vanishing silently.
 func forwardStage(ctx context.Context, c prctx.Context, p llm.Provider, s review.Stage, merged chan<- review.Event, wg *sync.WaitGroup) {
 	defer wg.Done()
 	events, err := s.Run(ctx, c, p)
@@ -519,14 +519,14 @@ func forwardStage(ctx context.Context, c prctx.Context, p llm.Provider, s review
 	}
 }
 
-// writeSSE 在 c.Stream 外部写一帧（首帧 pr meta 用）；调用方负责 Flush。
+// writeSSE writes a frame from outside c.Stream (used for the first pr meta frame); the caller is responsible for Flush.
 func writeSSE(w http.ResponseWriter, eventType string, data any) {
 	raw, _ := json.Marshal(data)
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, raw)
 }
 
-// writeSSERaw c.Stream 内部用；payload 已是 json.RawMessage，避免双次 Marshal。
-// c.Stream 在 step 返回后自动 Flush。
+// writeSSERaw is for use inside c.Stream; payload is already a json.RawMessage, which avoids marshalling twice.
+// c.Stream flushes automatically once step returns.
 // Invariant: data must be single-line JSON (no literal newlines); do not pretty-print,
 // as embedded newlines would break SSE framing (each data: line must be a complete field).
 func writeSSERaw(w io.Writer, eventType string, data json.RawMessage) {
