@@ -19,6 +19,7 @@ import { DiffView } from "@/components/review/DiffView";
 import { AgentPanel } from "@/components/review/AgentPanel";
 import { AdoptProvider } from "@/components/review/AdoptContext";
 import { usePerms } from "@/lib/perms";
+import { useT } from "@/lib/i18n/context";
 import {
   AgentSessionView,
   mergeToolDone,
@@ -51,6 +52,7 @@ export default function ReviewDetailPage({ params }: PageProps) {
 }
 
 function ReviewDetailPageContent({ id }: { id: string }) {
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -121,7 +123,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
     setToolEvents([]);
     if (isStreaming) {
       if (!sourceURL) {
-        setError("缺少 url 参数");
+        setError(t.review.missingUrlParam);
         setLoaded(true);
         return;
       }
@@ -300,7 +302,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
     return (
       <section className="space-y-4 px-6 py-8">
         <Link href="/history" className="text-xs text-muted hover:text-text">
-          ← 返回历史
+          {t.review.backToHistory}
         </Link>
         <p className="text-sm text-fail">{friendlyError(error)}</p>
         <button
@@ -308,7 +310,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           onClick={retry}
           className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text transition-colors hover:bg-surface-hover"
         >
-          重试
+          {t.review.retry}
         </button>
       </section>
     );
@@ -342,7 +344,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
             {/* 移动端：半透明遮罩，点击收起抽屉式侧栏 */}
             <button
               type="button"
-              aria-label="关闭侧栏"
+              aria-label={t.review.closeSidebarAriaLabel}
               onClick={() => setSidebarCollapsed(true)}
               className="absolute inset-0 z-30 bg-black/40 lg:hidden"
             />
@@ -364,10 +366,10 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           <div className="mx-auto flex max-w-[1080px] flex-col gap-4 px-5 py-5">
             {info ? <InfoBanner info={info} /> : null}
             {stageErrors.context ? (
-              <StageErrorBanner stage="上下文" message={stageErrors.context} />
+              <StageErrorBanner stage={t.review.stageContext} message={stageErrors.context} />
             ) : null}
             {stageErrors.suggestions ? (
-              <StageErrorBanner stage="建议" message={stageErrors.suggestions} />
+              <StageErrorBanner stage={t.review.stageSuggestions} message={stageErrors.suggestions} />
             ) : null}
             {view === "report" ? (
               <ReportContent
@@ -416,7 +418,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
             {/* 移动端：半透明遮罩，点击收起抽屉式追问面板 */}
             <button
               type="button"
-              aria-label="关闭追问面板"
+              aria-label={t.review.closeFollowUpPanelAriaLabel}
               onClick={() => setAgentOpen(false)}
               className="absolute inset-0 z-30 bg-black/40 lg:hidden"
             />
@@ -497,23 +499,24 @@ function ReportContent({
   budget: BudgetReport | null;
   onPickRisk: (r: Risk) => void;
 }) {
+  const t = useT();
   const dropped = budget?.dropped ?? [];
   return (
     <>
       {dropped.length > 0 ? <DroppedFilesNotice files={dropped} /> : null}
       {stageErrors.summary ? (
-        <StageErrorBanner stage="总结" message={stageErrors.summary} />
+        <StageErrorBanner stage={t.review.stageSummary} message={stageErrors.summary} />
       ) : (
         <SummaryCard summary={summary} streaming={streaming && !summaryDone} />
       )}
       {stageErrors.risks ? (
-        <StageErrorBanner stage="风险" message={stageErrors.risks} />
+        <StageErrorBanner stage={t.review.stageRisks} message={stageErrors.risks} />
       ) : risks.length > 0 ? (
         <RisksList risks={risks} onPickRisk={onPickRisk} />
       ) : risksDone ? (
-        <p className="text-sm text-muted">未发现风险。</p>
+        <p className="text-sm text-muted">{t.review.noRisksFound}</p>
       ) : streaming ? (
-        <p className="text-sm text-faint">扫描风险中…</p>
+        <p className="text-sm text-faint">{t.review.scanningRisks}</p>
       ) : null}
     </>
   );
@@ -521,26 +524,26 @@ function ReportContent({
 
 // DroppedFilesNotice 大 PR 超 token 预算丢文件时，在报告顶部声明评审范围不完整
 function DroppedFilesNotice({ files }: { files: string[] }) {
+  const t = useT();
   const shown = files.slice(0, 8);
   const rest = files.length - shown.length;
   return (
     <div className="rounded-md border border-high-bd bg-high-bg px-3 py-2 text-sm text-high">
-      <div className="font-medium">
-        {files.length} 个文件因体积超出预算，未纳入本次评审
-      </div>
+      <div className="font-medium">{t.review.droppedFilesNotice(files.length)}</div>
       <div className="mt-1 break-all font-mono text-[12px] text-text-2">
         {shown.join(" · ")}
-        {rest > 0 ? ` …+${rest} 个` : ""}
+        {rest > 0 ? t.review.droppedFilesMore(rest) : ""}
       </div>
-      <div className="mt-1 text-[12px] text-muted">摘要、风险与建议均不覆盖以上文件。</div>
+      <div className="mt-1 text-[12px] text-muted">{t.review.droppedFilesCoverageNote}</div>
     </div>
   );
 }
 
 function StageErrorBanner({ stage, message }: { stage: string; message: string }) {
+  const t = useT();
   return (
     <div className="rounded-md border border-high-bd bg-high-bg px-3 py-2 text-sm text-high">
-      <span className="font-medium">{stage}失败：</span>
+      <span className="font-medium">{t.review.stageFailedPrefix(stage)}</span>
       {message}
     </div>
   );
@@ -555,6 +558,7 @@ const infoProse =
   "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-surface [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-surface [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-text";
 
 function InfoBanner({ info }: { info: string }) {
+  const t = useT();
   const m = info.match(agentReplyPrefix);
   if (!m) {
     return (
@@ -566,7 +570,7 @@ function InfoBanner({ info }: { info: string }) {
   const body = m[1].trim();
   return (
     <div className="rounded-md border border-border bg-surface-2 px-4 py-3 text-sm text-text-2">
-      <div className="mb-2 text-xs text-muted">Agent 回复</div>
+      <div className="mb-2 text-xs text-muted">{t.review.agentReplyLabel}</div>
       <div className={infoProse}>
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
       </div>
@@ -575,9 +579,10 @@ function InfoBanner({ info }: { info: string }) {
 }
 
 function LoadingState() {
+  const t = useT();
   return (
     <p className="flex items-center gap-2 px-6 py-8 text-sm text-muted">
-      <Spinner size="xs" /> 加载中…
+      <Spinner size="xs" /> {t.review.loading}
     </p>
   );
 }
