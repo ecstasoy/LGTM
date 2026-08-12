@@ -8,11 +8,11 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/session"
 )
 
-// AuthCtx 读 session cookie → 加载 *session.Session 到 gin.Context
-// 未登录 / cookie 无效时不报错，handler 自己判断是否要求登录
-// sm=nil 时降级为占位（兼容老 main 接线）
+// AuthCtx reads the session cookie and loads the *session.Session onto the gin.Context
+// Not being logged in / an invalid cookie is not an error; each handler decides whether it requires login
+// With sm=nil it degrades to a placeholder (kept for older main wiring)
 //
-// userID 同时也塞 ctx 让既有 Store.Put 拿到（v1 永远 nil；v2 OAuth 后填）
+// userID is also put on the ctx so the existing Store.Put can pick it up (always nil in v1; filled in after v2 OAuth)
 func AuthCtx(sm *session.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var userID *string
@@ -24,7 +24,7 @@ func AuthCtx(sm *session.Manager) gin.HandlerFunc {
 					slog.Warn("session get failed", "err", err)
 				}
 				if s != nil {
-					c.Set("_lgtm_session", s) // 同 api.sessionCtxKey；避免循环 import 不直接 ref
+					c.Set("_lgtm_session", s) // same as api.sessionCtxKey; not referenced directly to avoid an import cycle
 					login := s.Login
 					userID = &login
 				}

@@ -8,8 +8,8 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
-// Models GET /api/models：返回可选模型白名单（L3 前端下拉数据源）。
-// 注册表为 nil（理论上不会，main 总会构造）时返回空数组，前端据此隐藏选择器。
+// Models GET /api/models: returns the allowlist of selectable models (the data source for the L3 frontend dropdown).
+// With a nil registry (which should not happen, main always builds one) it returns an empty array, and the frontend hides the selector.
 func Models(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d.Models == nil {

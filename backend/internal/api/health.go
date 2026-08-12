@@ -9,19 +9,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Health 旧 /health 端点 = liveness（无依赖检查）。保留以维持兼容。
-// 用法：容器编排 liveness probe、Docker HEALTHCHECK、UptimeRobot
+// Health is the old /health endpoint = liveness (no dependency checks). Kept for compatibility.
+// Used by: container orchestrator liveness probes, Docker HEALTHCHECK, UptimeRobot
 func Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// Readiness 检查下游依赖是否可用。任意 fail → 503，让 LB / k8s 摘流。
-// 检查项：
-//   - store：如果 Deps.Store 非 nil，调 Ping
-//   - 未来：Cache.Ping / LLM provider 健康（不接 LLM —— 第三方慢且不稳，
-//     readiness 自身要快、要确定）
+// Readiness checks whether downstream dependencies are usable. Any failure → 503, so the LB / k8s pulls it out of rotation.
+// Checks:
+// - store: Ping it when Deps.Store is non-nil
+// - future: Cache.Ping / LLM provider health (the LLM is deliberately left out — third parties are slow and flaky,
+// and readiness itself has to be fast and decisive)
 //
-// 超时阈值 1s：避免阻塞编排器；DB 一秒 ping 不上视为不健康
+// 1s timeout: never block the orchestrator; a DB that cannot be pinged within a second counts as unhealthy
 func Readiness(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)

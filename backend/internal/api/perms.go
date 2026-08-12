@@ -10,26 +10,26 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/oauth"
 )
 
-// PermsResponse GET /api/perms?owner=&repo= 返回字段
-// 前端拿它驱动「💬 评论」/「✅ 提交」按钮的 enable 状态
+// PermsResponse is what GET /api/perms?owner=&repo= returns
+// The frontend drives the enabled state of the 💬 comment / ✅ commit buttons off it
 type PermsResponse struct {
-	// Authenticated 用户是否已登录；未登录其它字段为 false / 空
+	// Authenticated reports whether the user is logged in; when false the other fields are false / empty
 	Authenticated bool `json:"authenticated"`
-	// Permission GitHub 返回的原始 perm（admin/maintain/write/triage/read/none）
-	// 前端 tooltip 用来解释为啥按钮 disable
+	// Permission is GitHub's raw perm (admin/maintain/write/triage/read/none)
+	// The frontend tooltip uses it to explain why a button is disabled
 	Permission string `json:"permission,omitempty"`
-	// CanComment 至少 triage 权限即可发 PR review comment
+	// CanComment needs triage permission at minimum to post a PR review comment
 	CanComment bool `json:"can_comment"`
-	// CanCommit 至少 write 权限可以 push commit
-	// 注意：仅对 base repo 的权限判定；fork PR 时若 maintainer_can_modify=false 还得另判
-	// 当前 v3 简化：fork PR 暂时按 base repo 权限近似（详见 G6c 实现）
+	// CanCommit needs write permission at minimum to push a commit
+	// Note: this judges permission on the base repo only; a fork PR with maintainer_can_modify=false needs a separate check
+	// Simplified for now: a fork PR is approximated by the base repo's permission
 	CanCommit bool `json:"can_commit"`
-	// Reason disable 原因；前端 tooltip 显示
+	// Reason is why it is disabled; shown in the frontend tooltip
 	Reason string `json:"reason,omitempty"`
 }
 
 // GetPerms GET /api/perms?owner=<>&repo=<>
-// 不需要 owner/repo 时返 401-friendly 空响应（前端 button 仍可 fallback 到「复制 markdown」）
+// With no owner/repo it returns a 401-friendly empty response (the frontend button can still fall back to "copy markdown")
 func GetPerms(oa *oauth.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner := c.Query("owner")
@@ -57,7 +57,7 @@ func GetPerms(oa *oauth.Client) gin.HandlerFunc {
 
 		perm, err := oa.GetRepoPermission(ctx, s.AccessToken, owner, repo, s.Login)
 		if err != nil {
-			// API 错（token 失效 / 网络）→ 保守按无权限返
+			// an API error (expired token / network) → conservatively report no permission
 			c.JSON(http.StatusOK, PermsResponse{
 				Authenticated: true,
 				Permission:    string(oauth.PermNone),
