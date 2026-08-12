@@ -10,7 +10,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
-// 验证 WireAgentSSE 三个 callback 都按 SSE 协议写帧
+// verifies that all three WireAgentSSE callbacks write frames in the SSE protocol
 func TestWireAgentSSE_WritesFrames(t *testing.T) {
 	rec := httptest.NewRecorder()
 	a := &agent.Agent{}

@@ -123,7 +123,7 @@ func TestWebhook_AcceptsSynchronizeAction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	secret := "s"
-	// Deps 没 Fetcher → goroutine 里 fetch 会 nil pointer，但 handler 立刻 202 返回前已成功
+	// Deps has no Fetcher → the fetch inside the goroutine nil-pointers, but the handler already returned 202 before that
 	r.POST("/api/webhook/github", WebhookGitHub(Deps{Fetcher: errFetcher{}}, secret))
 	body := []byte(`{"action":"synchronize","number":42,"pull_request":{"html_url":"https://github.com/o/r/pull/42","title":"x"},"repository":{"owner":{"login":"o"},"name":"r"},"installation":{"id":1},"sender":{"login":"u"}}`)
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -133,8 +133,8 @@ func TestWebhook_AcceptsSynchronizeAction(t *testing.T) {
 	req.Header.Set("X-GitHub-Event", "pull_request")
 	req.Header.Set("X-Hub-Signature-256", sig)
 	w := httptest.NewRecorder()
-	// 防 goroutine fetch nil panic 影响测试退出：recover via defer at handler level not possible here
-	// 但 202 response 在 spawn goroutine 之前发；以 status 为准
+	// keeps the goroutine's nil fetch panic from affecting test teardown: recover via defer at handler level is not possible here,
+	// but the 202 response is sent before the goroutine spawns, so status is what counts
 	defer func() { _ = recover() }()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusAccepted {
@@ -150,7 +150,7 @@ func TestWebhook_IssueCommentNonPRIgnored(t *testing.T) {
 	r := gin.New()
 	secret := "s"
 	r.POST("/api/webhook/github", WebhookGitHub(Deps{}, secret))
-	// issue.pull_request 字段缺失 → 不是 PR 评论
+	// issue.pull_request is missing → not a PR comment
 	body := []byte(`{"action":"created","issue":{"number":1},"comment":{"body":"/lgtm review"},"repository":{"owner":{"login":"o"},"name":"r"},"sender":{"login":"u"}}`)
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
@@ -173,7 +173,7 @@ func TestWebhook_IssueCommentBotSenderIgnored(t *testing.T) {
 	r := gin.New()
 	secret := "s"
 	r.POST("/api/webhook/github", WebhookGitHub(Deps{}, secret))
-	// sender 是 bot → 防自我循环
+	// sender is a bot → loop guard
 	body := []byte(`{"action":"created","issue":{"number":1,"pull_request":{"html_url":"x"}},"comment":{"body":"/lgtm review"},"repository":{"owner":{"login":"o"},"name":"r"},"sender":{"login":"lgtm-ai-reviewer[bot]"}}`)
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)

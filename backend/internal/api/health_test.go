@@ -10,7 +10,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// failPingStore 装饰 Store，把 Ping 改成报错；其他方法委托给 inner
+// failPingStore decorates a Store to make Ping fail; every other method delegates to inner
 type failPingStore struct{ inner store.Store }
 
 func (s failPingStore) Get(ctx context.Context, owner, repo string, pr int, headSHA string) (*store.Record, error) {

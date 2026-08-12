@@ -12,7 +12,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
 
-// recordingProvider 记录每次 Stream 收到的 Model，用于验证 per-stage 模型路由。
+// recordingProvider records the Model each Stream call receives, to verify per-stage model routing.
 type recordingProvider struct {
 	mu     sync.Mutex
 	models []string
@@ -23,11 +23,11 @@ func (p *recordingProvider) Stream(_ context.Context, req llm.Request) (<-chan l
 	p.models = append(p.models, req.Model)
 	p.mu.Unlock()
 	ch := make(chan llm.Chunk)
-	close(ch) // 空流：本测试只关心 Model 是否被透传，不关心 stage 后续解析
+	close(ch) // empty stream: this test only cares whether Model is passed through, not what the stage parses afterwards
 	return ch, nil
 }
 
-// mergeStages 应把每个 stage 的模型透传给 provider（L1 按阶段模型路由）。
+// mergeStages should pass each stage's model through to the provider (L1 per-stage model routing).
 func TestMergeStages_RoutesPerStageModels(t *testing.T) {
 	p := &recordingProvider{}
 	base := prctx.Context{L1Meta: "x"}
@@ -51,7 +51,7 @@ func TestMergeStages_RoutesPerStageModels(t *testing.T) {
 	}
 }
 
-// recordingBuilder 透传 base Build，但记录 BuildWith 收到的 RAGQuery，便于断言 per-stage 真传了不同 query
+// recordingBuilder passes Build through to base but records the RAGQuery given to BuildWith, so per-stage queries can be asserted as genuinely different
 type recordingBuilder struct {
 	queries []string
 }
@@ -69,7 +69,7 @@ func TestStageRAGQueryFor(t *testing.T) {
 	pr := gh.PullRequest{Files: []gh.File{{Path: "a.go"}, {Path: "b.go"}}}
 	cases := []struct {
 		stage   string
-		wantSub []string // query 应含这些子串
+		wantSub []string // the query should contain these substrings
 	}{
 		{"summary", []string{}},
 		{"risks", []string{"bug", "race", "a.go", "b.go"}},
@@ -99,7 +99,7 @@ func TestBuildPerStageContexts_CallsBuildWithQuery(t *testing.T) {
 
 	ctxs := buildPerStageContexts(context.Background(), rb, pr, base)
 
-	// summary 必须复用 base 不再调 BuildWith；risks/suggestions 必须各调一次（带 query）
+	// summary must reuse base and never call BuildWith; risks/suggestions must each call it once (with a query)
 	if got := len(rb.queries); got != 2 {
 		t.Fatalf("expected 2 BuildWith calls (risks + suggestions), got %d (queries=%+v)", got, rb.queries)
 	}
@@ -113,7 +113,7 @@ func TestBuildPerStageContexts_CallsBuildWithQuery(t *testing.T) {
 	}
 }
 
-// failingBuilder Build/BuildWith 都报错；验证 buildPerStageContexts fallback 到 base
+// failingBuilder fails on both Build and BuildWith; verifies buildPerStageContexts falls back to base
 type failingBuilder struct{}
 
 func (failingBuilder) Build(_ context.Context, _ gh.PullRequest) (prctx.Context, error) {

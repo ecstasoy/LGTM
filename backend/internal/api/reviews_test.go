@@ -12,7 +12,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// seedReview 直接往 store 写一条 cached review 用于 list / get 测试
+// seedReview writes one cached review straight into the store for the list / get tests
 func seedReview(t *testing.T, s store.Store, owner, repo string, pr int, sha, title string, when time.Time) string {
 	t.Helper()
 	payload, _ := json.Marshal(cachedPayload{
@@ -144,8 +144,8 @@ func TestParseLimit(t *testing.T) {
 	}
 }
 
-// seedFullReview 写一条 cached review，带 A1+A2 引入的完整 meta + checks + 自定义 risks。
-// 给 ListReviews CI/risks_counts 和 GetReview 全 meta 测试用。
+// seedFullReview writes a cached review with complete meta + checks + custom risks.
+// Used by the ListReviews CI/risks_counts test and the GetReview full-meta test.
 func seedFullReview(t *testing.T, s store.Store, risksJSON string) string {
 	t.Helper()
 	payload, _ := json.Marshal(cachedPayload{
@@ -297,7 +297,7 @@ func TestGetReview_IncludesFiles(t *testing.T) {
 }
 
 func TestListReviews_ExcludesFiles(t *testing.T) {
-	// list 端不应返 files（每条体积大、列表 50 条爆响应）
+	// the list endpoint should not return files (each is large, and 50 of them would blow up the response)
 	s := newTestStore(t)
 	payload, _ := json.Marshal(cachedPayload{
 		Title: "with files",
@@ -384,7 +384,7 @@ func TestCountRisksBySeverity(t *testing.T) {
 	}
 }
 
-// 验证：BudgetReport 字段在缓存 roundtrip 后从 /api/reviews/:id 完整透出，snake_case 与前端约定一致
+// verifies BudgetReport survives the cache roundtrip and comes out of /api/reviews/:id intact, in the snake_case the frontend expects
 func TestGetReview_IncludesBudgetReport(t *testing.T) {
 	s := newTestStore(t)
 	id := store.NewID()
@@ -414,7 +414,7 @@ func TestGetReview_IncludesBudgetReport(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
 	}
-	// 字段名直接断言原始 JSON，避免 reviewDetail 改 tag 时漏覆盖
+	// assert against the raw JSON field names, so a changed reviewDetail tag cannot slip through
 	for _, want := range []string{
 		`"budget_report":`, `"token_limit":16000`, `"used_l1":4200`,
 		`"used_l2":8800`, `"used_l3":1500`, `"dropped":["big/file.go"]`,
@@ -424,7 +424,7 @@ func TestGetReview_IncludesBudgetReport(t *testing.T) {
 		}
 	}
 
-	// 旧缓存（无 budget）应保持向后兼容：detail 不带 budget_report 字段
+	// older cache entries (no budget) must stay backwards compatible: detail carries no budget_report field
 	idOld := seedReview(t, s, "old", "r", 2, "sha2", "no budget", time.Unix(4000, 0))
 	res2, body2 := getJSON(t, srv, "/api/reviews/"+idOld)
 	if res2.StatusCode != 200 {
