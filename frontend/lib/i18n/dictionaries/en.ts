@@ -30,7 +30,7 @@ export const en: Dict = {
     submit: "Start review",
     modelPickerLabel: "Choose review model",
     perStageOff: "Choose model per stage",
-    perStageOn: "Per-stage (summary / risks / suggestions choose separately)",
+    perStageOn: "Per-stage (choose a model separately for summary / risks / suggestions)",
     stageModelAriaLabel: (stage: string) => `Model for the ${stage} stage`,
     examplesLabel: "Try:",
     howItWorksTitle: "How it works",
@@ -82,7 +82,7 @@ export const en: Dict = {
   },
   home: {
     introPrefix:
-      "Paste the link to any public repo's PR and start a review immediately — no sign-in required. Sign in with GitHub to archive your reviews, revisit them anytime, and delete them when you're done. To post LGTM's suggestions back to the PR as comments or commits with one click, install ",
+      "Paste the link to any public repo's PR and start a review immediately — no sign-in required. Sign in with GitHub to archive your reviews, revisit them anytime, and delete them when you're done. To post LGTM's suggestions back to the PR as comments or commits with one click, install the ",
     introSuffix:
       " on the relevant repo. Once installed, the LGTM bot also reviews newly opened PRs automatically.",
   },
