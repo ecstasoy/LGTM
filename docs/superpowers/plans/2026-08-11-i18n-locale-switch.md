@@ -1613,6 +1613,7 @@ git commit -m "feat(i18n): make locale part of the review cache identity"
 - Modify: `backend/internal/api/perms.go`
 - Modify: `backend/internal/api/auth.go`
 - Modify: `backend/internal/api/webhook.go`
+- Modify: `backend/internal/api/reviews.go`（计划修订，Task 14 验收发现）
 - Modify: `backend/internal/api/review_test.go`
 
 **Interfaces:**
@@ -1724,8 +1725,12 @@ const (
 	CodeSuggestionNoAnchor = "suggestion_missing_anchor"
 	CodeSuggestionNoPatch  = "suggestion_missing_patch"
 	CodeEmptyPR            = "empty_pr"
+	CodeHistoryLoginRequired = "history_login_required"
+	CodeNotReviewOwner       = "not_review_owner"
 )
 ```
+
+`reviews.go` 是 Task 14 浏览器验收补进来的：未登录访问 history 时，英文界面上会渲染出 `Failed to load: 请先登录后查看评审历史`——外壳翻了，插值进去的后端串没翻。它不属于「LLM 正文保持原语言」那条豁免，是通用鉴权错误。
 
 给每一处返回中文文案的错误响应加上对应 `code` 字段，`error` 字段保持原值不动。逐个映射：
 
@@ -1741,6 +1746,9 @@ const (
 | `review.go:154` | `CodePRNotFound` |
 | `review.go:156` | `CodeGitHubForbidden` |
 | `review.go:176` | `CodeEmptyPR` |
+| `reviews.go:109` | `CodeHistoryLoginRequired` |
+| `reviews.go:178` | `CodeNotLoggedIn` |
+| `reviews.go:193` | `CodeNotReviewOwner` |
 
 `perms.go` 的 `Reason` 字段同理加一个并列的 `ReasonCode` 字段，取值用同一批常量。
 
