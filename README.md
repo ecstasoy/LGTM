@@ -282,6 +282,7 @@ Agent 追问也是同一套思路：先把 L1/L3/L4 注入 prompt，再让工具
 - `highlight.js`。
 - `lucide-react`。
 - `class-variance-authority`、`clsx`、`tailwind-merge`。
+- `vitest`（dev 依赖）：`lib/` 下纯函数的单元测试。
 
 ## 原创说明
 

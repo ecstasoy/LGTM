@@ -4,8 +4,9 @@ import { LogOut } from "lucide-react";
 
 import { signInURL, signOut, useMe } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/context";
 
-// GitHubIcon 内联官方 mark；lucide v1 没 Github icon，避免引新依赖
+// GitHubIcon: inline official mark; lucide v1 has no Github icon, avoids pulling in a new dependency.
 function GitHubIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" className={className} fill="currentColor" aria-hidden>
@@ -14,14 +15,15 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
-// UserMenu 顶栏右上角组件：
-//   - loading：占位骨架（避免 flash）
-//   - 未登录：GitHub 登录按钮（链到 /api/auth/github/login，next=当前页）
-//   - 已登录：头像 + 登录名 + 登出按钮
+// UserMenu: top-right corner of the nav bar.
+//   - loading: skeleton placeholder (avoids a flash)
+//   - signed out: "Sign in with GitHub" button (links to /api/auth/github/login, next=current page)
+//   - signed in: avatar + login name + sign-out button
 //
-// 体积刻意压紧，跟现有 ThemeToggle / "追问" 按钮一行内对齐
+// Deliberately compact to line up with the ThemeToggle / "Ask a follow-up" button in the same row.
 export function UserMenu({ className }: { className?: string }) {
   const { me, loading } = useMe();
+  const t = useT();
 
   if (loading) {
     return (
@@ -45,7 +47,7 @@ export function UserMenu({ className }: { className?: string }) {
         )}
       >
         <GitHubIcon className="h-3.5 w-3.5" />
-        GitHub 登录
+        {t.userMenu.signIn}
       </a>
     );
   }
@@ -54,7 +56,7 @@ export function UserMenu({ className }: { className?: string }) {
     <div className={cn("inline-flex items-center gap-1.5", className)}>
       <div className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2 text-xs">
         {me.avatar_url ? (
-          // 不用 next/image 避免域名白名单配置；头像最多 26px 不在意优化
+          // Skip next/image to avoid domain allowlist config; the avatar is at most 26px, not worth optimizing.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={me.avatar_url}
@@ -67,8 +69,8 @@ export function UserMenu({ className }: { className?: string }) {
       <button
         type="button"
         onClick={() => void signOut()}
-        title="登出"
-        aria-label="登出"
+        title={t.userMenu.signOut}
+        aria-label={t.userMenu.signOut}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-text"
       >
         <LogOut className="h-3.5 w-3.5" />

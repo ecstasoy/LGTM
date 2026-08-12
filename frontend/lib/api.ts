@@ -11,12 +11,8 @@ export interface ModelOption {
 // StageKey 评审阶段（与后端 stage 名一致）；L3 分阶段选模型用
 export type StageKey = "summary" | "risks" | "suggestions";
 
-// STAGES 阶段顺序 + 中文标签（分阶段选择器渲染用）
-export const STAGES: { key: StageKey; label: string }[] = [
-  { key: "summary", label: "摘要" },
-  { key: "risks", label: "风险" },
-  { key: "suggestions", label: "建议" },
-];
+// Stage order for the per-stage model picker. Labels live in the i18n dictionaries, keyed by StageKey.
+export const STAGE_KEYS: StageKey[] = ["summary", "risks", "suggestions"];
 
 // getModels 拉可选模型列表；失败 / 未配置注册表时返回空数组（前端据此隐藏选择器）
 export async function getModels(): Promise<ModelOption[]> {

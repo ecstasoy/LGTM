@@ -32,7 +32,7 @@ jobs:
         run: go test ./... -race -count=1
 
   frontend:
-    name: Frontend (tsc + build)
+    name: Frontend (test + tsc + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -57,6 +57,9 @@ jobs:
 
       - name: Type-check
         run: pnpm exec tsc --noEmit
+
+      - name: Test
+        run: pnpm test
 
       - name: Build
         run: pnpm build
