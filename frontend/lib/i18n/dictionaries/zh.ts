@@ -24,7 +24,7 @@ export const zh = {
     heroLeadOutputs: "总结 / 风险 / 行内建议",
     heroLeadSuffix: "，可一键发到原 PR。",
     urlPlaceholder: "https://github.com/owner/repo/pull/123",
-    urlAriaLabel: "GitHub Pull Request URL",
+    urlAriaLabel: "GitHub pull request URL",
     submit: "开始评审",
     modelPickerLabel: "选择评审模型",
     perStageOff: "分阶段选择模型",
