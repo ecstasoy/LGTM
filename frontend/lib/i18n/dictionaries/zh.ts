@@ -177,6 +177,8 @@ export const zh = {
     undoLabel: "撤回",
     commentActionFailedPrefix: (msg: string) => `失败：${msg}`,
     commitActionFailedPrefix: (msg: string) => `提交失败：${msg}`,
+    // Trailing space is load-bearing here too: "commit" is a Latin loanword followed by the sha,
+    // not fullwidth punctuation, so (unlike stageFailedPrefix) it needs its own space before {sha}.
     commitPostedPrefix: "已提交 commit ",
     commitHalfDoneReason: "评论已上 PR，但 GitHub 拒绝自动 commit（可能是 fork 未开放编辑）。",
     manualApplyLinkText: "去 GitHub 手动 Apply",

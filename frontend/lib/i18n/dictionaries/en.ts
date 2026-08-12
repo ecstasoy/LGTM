@@ -175,7 +175,7 @@ export const en: Dict = {
     commentSendingLabel: "Sending…",
     signInToCommentButton: "Sign in to comment",
     signInAfterGithubTitle: "Sign in with GitHub to post directly to the PR",
-    commentButtonTitle: "Posted as a GitHub PR review comment (includes a one-click Apply block)",
+    commentButtonTitle: "Posts a GitHub PR review comment (includes a one-click Apply block)",
     commitButtonTitle: "Posts a review comment and immediately triggers a GitHub Apply commit to the PR branch",
     commitToPrButton: "Commit directly",
     commitSendingLabel: "Committing…",
@@ -190,6 +190,8 @@ export const en: Dict = {
     undoLabel: "Undo",
     commentActionFailedPrefix: (msg: string) => `Failed: ${msg}`,
     commitActionFailedPrefix: (msg: string) => `Commit failed: ${msg}`,
+    // Trailing space is intentional (same reasoning as stageFailedPrefix above): JSX strips the
+    // whitespace-only text node between this and the following {sha}, so the space must live here.
     commitPostedPrefix: "Committed ",
     commitHalfDoneReason:
       "The comment was posted, but GitHub declined to auto-commit (the fork may not allow edits).",
