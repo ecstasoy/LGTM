@@ -115,7 +115,7 @@ export const en: Dict = {
     signOut: "Sign out",
   },
   review: {
-    missingUrlParam: "Missing url parameter",
+    missingUrlParam: "Missing URL parameter",
     backToHistory: "← Back to history",
     retry: "Retry",
     closeSidebarAriaLabel: "Close sidebar",
@@ -132,7 +132,10 @@ export const en: Dict = {
     stageSummary: "Summary",
     stageRisks: "Risks",
     stageSuggestions: "Suggestions",
-    stageFailedPrefix: (stage: string) => `${stage} failed:`,
+    // Trailing space is intentional: JSX strips the whitespace-only text node between
+    // the <span> and the following {message}, so the space must live in the string itself.
+    // Chinese keeps no trailing space — the fullwidth colon already carries its own spacing.
+    stageFailedPrefix: (stage: string) => `${stage} failed: `,
     noRisksFound: "No risks found.",
     scanningRisks: "Scanning for risks…",
     droppedFilesNotice: (n: number) =>
