@@ -6,6 +6,7 @@ import { History } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { BrandMark } from "./BrandMark";
+import { LocaleToggle } from "./LocaleToggle";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./auth/UserMenu";
 
@@ -33,6 +34,7 @@ export function NavBar() {
 
       <div className="ml-auto flex items-center gap-2">
         <UserMenu />
+        <LocaleToggle />
         <ThemeToggle />
       </div>
     </header>
