@@ -14,6 +14,7 @@ import type { PrMeta } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/BrandMark";
 import { CIStatus, type CIStatusValue } from "@/components/ui/ci-status";
+import { LocaleToggle } from "@/components/LocaleToggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { useT } from "@/lib/i18n/context";
@@ -124,6 +125,7 @@ export function ReviewTopBar({
         {t.review.followUp}
       </button>
       <UserMenu />
+      <LocaleToggle />
       <ThemeToggle />
     </header>
   );
