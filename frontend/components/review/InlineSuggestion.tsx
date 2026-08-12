@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { signInURL } from "@/lib/auth";
 import { CategoryBadge, type Category } from "@/components/ui/badge";
 import { useAdopt } from "./AdoptContext";
+import { useT } from "@/lib/i18n/context";
 
 interface Props {
   suggestion: Suggestion;
@@ -27,6 +28,7 @@ type ActionState =
 // 4 按钮：💬 评论 (G6b)、✅ 提交 (G6c stub)、📋 复制 markdown、✕ 忽略
 // 评论/提交按钮按 useAdopt() 返的 perms 状态 disable + 悬浮 tooltip 说明原因
 export function InlineSuggestion({ suggestion, onCopy }: Props) {
+  const t = useT();
   const adopt = useAdopt();
   const [copied, setCopied] = useState(false);
   const [comment, setComment] = useState<ActionState>({ kind: "idle" });
@@ -108,18 +110,18 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
 
   // tooltip 文案：按状态优先级返
   function disableReason(): string {
-    if (!reviewReady) return "评审保存中…请等几秒";
-    if (!authenticated) return "登录后才能直接发到 GitHub";
+    if (!reviewReady) return t.review.reviewSavingHint;
+    if (!authenticated) return t.review.signInToPostHint;
     if (perms?.reason) return perms.reason;
     return "";
   }
 
   function commitDisableReason(): string {
-    if (prMerged) return "PR 已合并，head 分支通常已删除，无法提交 commit（评论仍可发作历史记录）";
-    if (prClosed) return "PR 已关闭，无法提交 commit";
+    if (prMerged) return t.review.prMergedCommitDisabledReason;
+    if (prClosed) return t.review.prClosedCommitDisabledReason;
     if (!reviewReady) return disableReason();
-    if (!authenticated) return "登录后才能提交";
-    if (!(perms?.can_commit)) return perms?.reason || "无 push 权限；可改用「评论」";
+    if (!authenticated) return t.review.signInToCommitHint;
+    if (!(perms?.can_commit)) return perms?.reason || t.review.noPushPermissionReason;
     return "";
   }
 
@@ -127,13 +129,13 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
     <div className="animate-fade-up border-y border-border bg-surface-2 py-2.5 pl-[50px] pr-3.5">
       {prInactive ? (
         <div className="mb-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-[11px] text-muted">
-          {prMerged ? "📌" : "🗃"} PR 已{prMerged ? "合并" : "关闭"}，建议仅供回顾
+          {prMerged ? "📌" : "🗃"} {t.review.prInactiveBanner(prMerged)}
         </div>
       ) : null}
       <div className="mb-1.5 flex items-center gap-[7px]">
         <span className="inline-flex items-center gap-1 rounded-[5px] bg-accent-soft px-[7px] py-0.5 font-mono text-xs font-semibold text-accent">
           <Sparkle className="h-3 w-3" fill="currentColor" />
-          AI 建议
+          {t.review.aiSuggestionBadge}
         </span>
         <CategoryBadge category={suggestion.type as Category} />
       </div>
@@ -167,19 +169,19 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
             onClick={postComment}
             disabled={comment.kind === "posting"}
             className="inline-flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-medium text-accent-fg hover:opacity-90 disabled:opacity-60"
-            title="作为 PR review comment 发到 GitHub（含一键 Apply 块）"
+            title={t.review.commentButtonTitle}
           >
             <MessageSquare className="h-3 w-3" />
-            {comment.kind === "posting" ? "发送中…" : "评论到 PR"}
+            {comment.kind === "posting" ? t.review.commentSendingLabel : t.review.commentToPrButton}
           </button>
         ) : !authenticated && reviewReady ? (
           <a
             href={signInURL()}
             className="inline-flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-medium text-accent-fg hover:opacity-90"
-            title="GitHub 登录后即可直接发到 PR"
+            title={t.review.signInAfterGithubTitle}
           >
             <MessageSquare className="h-3 w-3" />
-            登录后评论
+            {t.review.signInToCommentButton}
           </a>
         ) : (
           <button
@@ -189,7 +191,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
             className="inline-flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-medium text-accent-fg opacity-50 cursor-not-allowed"
           >
             <MessageSquare className="h-3 w-3" />
-            评论到 PR
+            {t.review.commentToPrButton}
           </button>
         )}
 
@@ -200,10 +202,10 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
             onClick={postCommit}
             disabled={commit.kind === "posting"}
             className="inline-flex h-7 items-center gap-1 rounded-md border border-border-strong bg-surface px-2.5 text-xs text-text-2 hover:bg-surface-hover hover:text-text disabled:opacity-60"
-            title="发 review comment 并立即 GitHub apply 触发一条 commit 到 PR 分支"
+            title={t.review.commitButtonTitle}
           >
             <GitCommit className="h-3 w-3" />
-            {commit.kind === "posting" ? "提交中…" : "直接提交"}
+            {commit.kind === "posting" ? t.review.commitSendingLabel : t.review.commitToPrButton}
           </button>
         ) : (
           <button
@@ -213,7 +215,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
             className="inline-flex h-7 items-center gap-1 rounded-md border border-border-strong bg-surface px-2.5 text-xs text-muted opacity-60 cursor-not-allowed"
           >
             <GitCommit className="h-3 w-3" />
-            直接提交
+            {t.review.commitToPrButton}
           </button>
         )}
 
@@ -224,7 +226,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
           className="inline-flex h-7 items-center gap-1 rounded-md border border-border-strong bg-surface px-2.5 text-xs text-text-2 hover:bg-surface-hover hover:text-text"
         >
           {copied ? <Check className="h-3 w-3 text-ok" /> : <Clipboard className="h-3 w-3" />}
-          {copied ? "已复制" : "复制 markdown"}
+          {copied ? t.review.copiedLabel : t.review.copyMarkdownButton}
         </button>
 
         {/* ✕ 忽略：本地隐藏 */}
@@ -234,7 +236,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
           className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs text-muted hover:text-text"
         >
           <X className="h-3 w-3" />
-          忽略
+          {t.review.dismissButton}
         </button>
       </div>
 
@@ -242,7 +244,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
       {comment.kind === "done" ? (
         <p className="mt-2 inline-flex items-center gap-2 text-[11px] text-ok">
           <Check className="h-3 w-3" />
-          已发到 PR
+          {t.review.commentPostedLabel}
           {comment.url ? (
             <a
               href={comment.url}
@@ -250,7 +252,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
               rel="noreferrer"
               className="inline-flex items-center gap-0.5 underline hover:opacity-80"
             >
-              查看
+              {t.review.viewLinkLabel}
               <ExternalLink className="h-2.5 w-2.5" />
             </a>
           ) : null}
@@ -259,26 +261,26 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
               type="button"
               onClick={undoComment}
               className="inline-flex items-center gap-0.5 text-muted hover:text-high"
-              title="删除这条 PR review comment"
+              title={t.review.undoCommentTitle}
             >
               <X className="h-2.5 w-2.5" />
-              撤回
+              {t.review.undoLabel}
             </button>
           ) : null}
         </p>
       ) : null}
       {comment.kind === "undoing" ? (
-        <p className="mt-2 text-[11px] text-muted">撤回中…</p>
+        <p className="mt-2 text-[11px] text-muted">{t.review.undoingLabel}</p>
       ) : null}
       {comment.kind === "undone" ? (
         <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-muted">
           <X className="h-3 w-3" />
-          已撤回
+          {t.review.undoneLabel}
         </p>
       ) : null}
       {comment.kind === "error" ? (
         <p className="mt-2 text-[11px] text-high" title={comment.msg}>
-          失败：{comment.msg}
+          {t.review.commentActionFailedPrefix(comment.msg)}
         </p>
       ) : null}
 
@@ -286,7 +288,8 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
       {commit.kind === "done" && !commit.halfDone ? (
         <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-ok">
           <Check className="h-3 w-3" />
-          已提交 commit {commit.commitSHA ? commit.commitSHA.slice(0, 7) : ""}
+          {t.review.commitPostedPrefix}
+          {commit.commitSHA ? commit.commitSHA.slice(0, 7) : ""}
           {commit.url ? (
             <a
               href={commit.url}
@@ -294,7 +297,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
               rel="noreferrer"
               className="inline-flex items-center gap-0.5 underline hover:opacity-80"
             >
-              查看
+              {t.review.viewLinkLabel}
               <ExternalLink className="h-2.5 w-2.5" />
             </a>
           ) : null}
@@ -302,7 +305,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
       ) : null}
       {commit.kind === "done" && commit.halfDone ? (
         <p className="mt-2 text-[11px] text-med" title={commit.halfDoneReason}>
-          评论已上 PR，但 GitHub 拒绝自动 commit（可能是 fork 未开放编辑）。
+          {t.review.commitHalfDoneReason}
           {commit.url ? (
             <a
               href={commit.url}
@@ -310,7 +313,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
               rel="noreferrer"
               className="ml-1 inline-flex items-center gap-0.5 underline hover:opacity-80"
             >
-              去 GitHub 手动 Apply
+              {t.review.manualApplyLinkText}
               <ExternalLink className="h-2.5 w-2.5" />
             </a>
           ) : null}
@@ -318,7 +321,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
       ) : null}
       {commit.kind === "error" ? (
         <p className="mt-2 text-[11px] text-high" title={commit.msg}>
-          提交失败：{commit.msg}
+          {t.review.commitActionFailedPrefix(commit.msg)}
         </p>
       ) : null}
     </div>

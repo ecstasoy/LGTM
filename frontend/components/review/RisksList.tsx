@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowUpRight } from "lucide-react";
 
 import type { Risk } from "@/lib/types";
 import { CategoryBadge, SeverityBadge, type Category } from "@/components/ui/badge";
+import { useT } from "@/lib/i18n/context";
 
 interface Props {
   risks: Risk[];
@@ -18,6 +19,7 @@ const SEV_RANK: Record<Risk["severity"], number> = { high: 0, medium: 1, low: 2 
 // RisksList 风险识别面板：标题 + 数量；按 severity → confidence 排序
 // 点击 row 跳 Diff 视图 + 滚到对应行（onPickRisk 不传则纯展示）
 export function RisksList({ risks, onPickRisk }: Props) {
+  const t = useT();
   if (risks.length === 0) return null;
 
   const sorted = [...risks].sort((a, b) => {
@@ -34,21 +36,29 @@ export function RisksList({ risks, onPickRisk }: Props) {
             <AlertTriangle className="h-4 w-4" />
           </span>
           <h2 className="text-sm font-semibold">
-            风险识别 <span className="text-muted">{sorted.length} 项</span>
+            {t.review.risksPanelTitle} <span className="text-muted">{t.review.riskCount(sorted.length)}</span>
           </h2>
         </div>
-        {onPickRisk ? <span className="text-xs text-faint">点击跳到代码</span> : null}
+        {onPickRisk ? <span className="text-xs text-faint">{t.review.risksClickHint}</span> : null}
       </header>
       <ul className="divide-y divide-border">
         {sorted.map((r, i) => (
-          <RiskRow key={i} risk={r} onPick={onPickRisk} />
+          <RiskRow key={i} risk={r} onPick={onPickRisk} t={t} />
         ))}
       </ul>
     </section>
   );
 }
 
-function RiskRow({ risk, onPick }: { risk: Risk; onPick?: (r: Risk) => void }) {
+function RiskRow({
+  risk,
+  onPick,
+  t,
+}: {
+  risk: Risk;
+  onPick?: (r: Risk) => void;
+  t: ReturnType<typeof useT>;
+}) {
   const clickable = !!onPick && risk.line != null;
   const inner = (
     <>
@@ -74,7 +84,7 @@ function RiskRow({ risk, onPick }: { risk: Risk; onPick?: (r: Risk) => void }) {
           type="button"
           onClick={() => onPick!(risk)}
           className="group w-full cursor-pointer px-4 py-3 text-left transition-colors hover:bg-surface-hover"
-          title={`跳到 ${risk.file}:${risk.line}`}
+          title={t.review.riskJumpToTitle(risk.file, risk.line!)}
         >
           {inner}
         </button>

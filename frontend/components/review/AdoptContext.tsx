@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import type { PrMeta, Suggestion } from "@/lib/types";
 import type { PermsResponse } from "@/lib/perms";
+import { useT } from "@/lib/i18n/context";
 
 // AdoptResult 后端 /comment 或 /commit 端点成功返回字段
 // CommentPostedButCommitFailed 仅 /commit 端点返：comment 已上 PR 但 GraphQL apply 失败
@@ -57,6 +58,7 @@ function adoptedStorageKey(reviewId: string): string {
 }
 
 export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestions, children }: ProviderProps) {
+  const t = useT();
   // 已采纳 idx 集合；初始空，hydrate effect 从 localStorage 加载
   const [adoptedIdxs, setAdoptedIdxs] = useState<Set<number>>(() => new Set());
 
@@ -123,9 +125,9 @@ export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestio
 
   const postComment = useCallback(
     async (s: Suggestion): Promise<AdoptResult> => {
-      if (!reviewId) throw new Error("评审还在流式生成中，请等结束");
+      if (!reviewId) throw new Error(t.review.reviewStreamingError);
       const idx = suggestions.indexOf(s);
-      if (idx < 0) throw new Error("找不到建议在列表中的位置");
+      if (idx < 0) throw new Error(t.review.suggestionNotFoundError);
       const res = await fetch(`/api/review/${encodeURIComponent(reviewId)}/comment/${idx}`, {
         method: "POST",
         credentials: "include",
@@ -136,14 +138,14 @@ export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestio
       }
       return data;
     },
-    [reviewId, suggestions],
+    [reviewId, suggestions, t],
   );
 
   const postCommit = useCallback(
     async (s: Suggestion): Promise<AdoptResult> => {
-      if (!reviewId) throw new Error("评审还在流式生成中，请等结束");
+      if (!reviewId) throw new Error(t.review.reviewStreamingError);
       const idx = suggestions.indexOf(s);
-      if (idx < 0) throw new Error("找不到建议在列表中的位置");
+      if (idx < 0) throw new Error(t.review.suggestionNotFoundError);
       const res = await fetch(`/api/review/${encodeURIComponent(reviewId)}/commit/${idx}`, {
         method: "POST",
         credentials: "include",
@@ -155,12 +157,12 @@ export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestio
       // 200 + ok=false：comment 上了但 apply 失败（不抛错，让 caller 区分两态显示）
       return data;
     },
-    [reviewId, suggestions],
+    [reviewId, suggestions, t],
   );
 
   const deleteComment = useCallback(
     async (cid: number): Promise<void> => {
-      if (!reviewId) throw new Error("无 reviewId，无法撤回");
+      if (!reviewId) throw new Error(t.review.missingReviewIdError);
       const res = await fetch(`/api/review/${encodeURIComponent(reviewId)}/comment/${cid}`, {
         method: "DELETE",
         credentials: "include",
@@ -168,7 +170,7 @@ export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestio
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     },
-    [reviewId],
+    [reviewId, t],
   );
 
   const value = useMemo(

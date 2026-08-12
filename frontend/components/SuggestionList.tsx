@@ -1,4 +1,7 @@
+"use client";
+
 import type { Suggestion } from "@/lib/types";
+import { useT } from "@/lib/i18n/context";
 
 const typeClass = {
   bug: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
@@ -14,6 +17,7 @@ interface Props {
 
 // SuggestionList 按 file 分组，每条 type 徽章 + title + body + 可选 patch 前后对比
 export function SuggestionList({ suggestions }: Props) {
+  const t = useT();
   if (suggestions.length === 0) return null;
 
   const byFile = new Map<string, Suggestion[]>();
@@ -25,22 +29,30 @@ export function SuggestionList({ suggestions }: Props) {
 
   return (
     <section className="space-y-3">
-      <h3 className="text-base font-medium">行内建议（{suggestions.length}）</h3>
+      <h3 className="text-base font-medium">{t.review.inlineSuggestionsHeading(suggestions.length)}</h3>
       <div className="space-y-2">
         {[...byFile.entries()].map(([file, items]) => (
-          <FileGroup key={file} file={file} suggestions={items} />
+          <FileGroup key={file} file={file} suggestions={items} t={t} />
         ))}
       </div>
     </section>
   );
 }
 
-function FileGroup({ file, suggestions }: { file: string; suggestions: Suggestion[] }) {
+function FileGroup({
+  file,
+  suggestions,
+  t,
+}: {
+  file: string;
+  suggestions: Suggestion[];
+  t: ReturnType<typeof useT>;
+}) {
   return (
     <details open className="rounded-md border border-zinc-200 dark:border-zinc-800">
       <summary className="cursor-pointer bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-900/40">
         <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-800">{file}</code>
-        <span className="ml-2 text-xs text-zinc-500">{suggestions.length} 条</span>
+        <span className="ml-2 text-xs text-zinc-500">{t.review.suggestionCountBadge(suggestions.length)}</span>
       </summary>
       <ul className="space-y-3 px-3 pb-3 pt-2">
         {suggestions.map((s, i) => (
