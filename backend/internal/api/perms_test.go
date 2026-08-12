@@ -14,7 +14,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/session"
 )
 
-// startPermsTestServer 起带 /api/perms 路由的迷你 server；middleware 简化版自己读 cookie
+// startPermsTestServer starts a mini server with the /api/perms route; the simplified middleware reads the cookie itself
 func startPermsTestServer(t *testing.T, oa *oauth.Client, sm *session.Manager) *httptest.Server {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -34,7 +34,7 @@ func startPermsTestServer(t *testing.T, oa *oauth.Client, sm *session.Manager) *
 	return srv
 }
 
-// permsAPISrv 返回固定 perm 的 mock GitHub API server
+// permsAPISrv is a mock GitHub API server returning a fixed perm
 func permsAPISrv(t *testing.T, perm string, status int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -155,5 +155,5 @@ func TestPerms_NotCollaboratorReturns404Asnone(t *testing.T) {
 	}
 }
 
-// 防 url 包 import 警告（rewriteHost 用）
+// keeps the url package from being flagged as an unused import (rewriteHost needs it)
 var _ = url.QueryEscape

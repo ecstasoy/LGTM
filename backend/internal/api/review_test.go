@@ -21,7 +21,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// fakeFetcher 让测试注入预设的 PR 数据或错误。
+// fakeFetcher lets a test inject canned PR data or an error.
 type fakeFetcher struct {
 	pr  gh.PullRequest
 	err error
@@ -31,8 +31,8 @@ func (f fakeFetcher) Fetch(_ context.Context, _ string) (gh.PullRequest, error) 
 	return f.pr, f.err
 }
 
-// startTestServer 起一个真实 httptest server；gin.c.Stream 在 ResponseRecorder 下会因 CloseNotify panic。
-// 自动补默认 Builder，免每个测试都填。
+// startTestServer starts a real httptest server; under a ResponseRecorder, gin.c.Stream panics on CloseNotify.
+// It fills in a default Builder so every test does not have to.
 func startTestServer(t *testing.T, deps Deps) *httptest.Server {
 	t.Helper()
 	if deps.Builder == nil {
@@ -46,7 +46,7 @@ func startTestServer(t *testing.T, deps Deps) *httptest.Server {
 	return srv
 }
 
-// countingProvider 包装一个 Provider 并记录 Stream 调用次数，验证缓存命中是否真的跳过 LLM
+// countingProvider wraps a Provider and counts Stream calls, to verify a cache hit really does skip the LLM
 type countingProvider struct {
 	inner llm.Provider
 	calls atomic.Int32
@@ -109,7 +109,7 @@ func parseSSE(body string) []sseFrame {
 	return frames
 }
 
-// dualMockProvider 按 req.JSONSchema 是否非 nil 切换 reply。
+// dualMockProvider switches its reply on whether req.JSONSchema is non-nil.
 type dualMockProvider struct {
 	textReply string
 	jsonReply string
@@ -288,7 +288,7 @@ func TestPostReview_FetcherError(t *testing.T) {
 	}
 }
 
-// newTestStore 起内存 SQLite 用于 cache 测试
+// newTestStore starts an in-memory SQLite for the cache tests
 func newTestStore(t *testing.T) *store.SQLiteStore {
 	t.Helper()
 	s, err := store.NewSQLiteStore(":memory:")
@@ -306,7 +306,7 @@ func samplePR() gh.PullRequest {
 	}
 }
 
-// samplePRWithMeta 在 samplePR 基础上填齐 A1+A2 引入的所有 PR meta 字段，供透字段测试用。
+// samplePRWithMeta extends samplePR with every PR meta field, for the field pass-through tests.
 func samplePRWithMeta() gh.PullRequest {
 	p := samplePR()
 	p.Author = "lin-mei"
@@ -362,7 +362,7 @@ func TestPostReview_CacheMiss_PersistsResult(t *testing.T) {
 
 func TestPostReview_CacheHit_SkipsStages(t *testing.T) {
 	s := newTestStore(t)
-	// 预置一条缓存
+	// seed one cache entry
 	cached, _ := json.Marshal(map[string]any{
 		"summary":     "回放的总结内容",
 		"risks":       json.RawMessage(`[{"file":"x.go","line":1,"severity":"high","category":"bug","confidence":0.9,"reason":"cached"}]`),
@@ -438,7 +438,7 @@ func TestPostReview_NilStore_NoCrashAndNoCache(t *testing.T) {
 
 func TestPostReview_StageError_SkipsCache(t *testing.T) {
 	s := newTestStore(t)
-	// mockProvider 返非 JSON 文本 → RisksStage / SuggestionsStage 解析失败 → emit error event
+	// mockProvider returns non-JSON text → RisksStage / SuggestionsStage fail to parse → emit an error event
 	srv := startTestServer(t, Deps{
 		Fetcher: fakeFetcher{pr: samplePR()},
 		Provider: dualMockProvider{
@@ -483,7 +483,7 @@ func TestPostReview_EmptyPR_ShortCircuits(t *testing.T) {
 	for _, f := range frames {
 		switch f.Type {
 		case "pr":
-			// OK，首帧
+			// OK, first frame
 		case "info":
 			sawInfo = true
 			if !strings.Contains(f.Data, "无可评审") {

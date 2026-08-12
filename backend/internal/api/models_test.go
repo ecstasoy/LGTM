@@ -17,7 +17,7 @@ func testRegistry() *llm.Registry {
 	}, "ds")
 }
 
-// GET /api/models 返回注册表里的可选模型（L3 前端白名单数据源）。
+// GET /api/models returns the selectable models in the registry (the data source for the L3 frontend allowlist).
 func TestGetModels_ReturnsRegistryOptions(t *testing.T) {
 	srv := startTestServer(t, Deps{Models: testRegistry()})
 	resp, err := http.Get(srv.URL + "/api/models")
@@ -37,7 +37,7 @@ func TestGetModels_ReturnsRegistryOptions(t *testing.T) {
 	}
 }
 
-// /api/review 收到不在白名单的 model 时 400，不进入 fetch / LLM（白名单是 L3 的成本 / 安全闸）。
+// /api/review returns 400 for a model outside the allowlist, before any fetch / LLM call (the allowlist is L3's cost / safety gate).
 func TestPostReview_RejectsUnknownModel(t *testing.T) {
 	srv := startTestServer(t, Deps{Models: testRegistry()})
 	body, _ := json.Marshal(map[string]string{
@@ -54,7 +54,7 @@ func TestPostReview_RejectsUnknownModel(t *testing.T) {
 	}
 }
 
-// /api/review 的 stage_models 里有未知模型时也 400（按阶段覆盖同样走白名单，不进 fetch / LLM）。
+// an unknown model inside /api/review's stage_models is a 400 too (per-stage overrides go through the same allowlist, before any fetch / LLM call).
 func TestPostReview_RejectsUnknownStageModel(t *testing.T) {
 	srv := startTestServer(t, Deps{Models: testRegistry()})
 	body, _ := json.Marshal(map[string]any{

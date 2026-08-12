@@ -8,10 +8,10 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
-// WireAgentSSE 把 SSE writer 接到 Agent 的 callbacks：tool 调用 / text 增量
-// 写成 SSE 帧推给前端 lib/sse.ts。覆盖现有 callback 字段（调用方应在 Run 之前调一次）。
+// WireAgentSSE hooks an SSE writer up to the Agent's callbacks, turning tool calls / text deltas
+// into SSE frames for the frontend's lib/sse.ts. It overwrites the existing callback fields (call it once, before Run).
 //
-// SSE 帧约定（前端消费）：
+// SSE frame contract (as consumed by the frontend):
 //
 //	event: tool_call_start
 //	data:  { "id": "call_abc", "name": "read_file", "arguments": "{\"file\":\"main.go\"}" }
@@ -22,8 +22,8 @@ import (
 //	event: agent_text_delta
 //	data:  { "delta": "..." }
 //
-// 与 review.go 现有 `summary_delta` 区分：agent_text_delta 是 agent loop 自己的文本，
-// summary_delta 是 review SummaryStage 流式。前端时间线把 tool_call_* 渲染成额外步骤。
+// Distinct from review.go's existing `summary_delta`: agent_text_delta is text from the agent loop itself,
+// while summary_delta streams from the review SummaryStage. The frontend timeline renders tool_call_* as extra steps.
 func WireAgentSSE(a *agent.Agent, w http.ResponseWriter) {
 	a.OnToolCallStart = func(_ context.Context, c llm.ToolCall) {
 		writeSSE(w, "tool_call_start", map[string]any{
@@ -47,8 +47,8 @@ func WireAgentSSE(a *agent.Agent, w http.ResponseWriter) {
 	}
 }
 
-// flush 立即推 buf；agent loop tool 调用之间可能间隔较长，必须每帧 flush 让浏览器
-// 实时收到（gin 默认 buffer + Flusher 接口）
+// flush pushes buf immediately; gaps between an agent loop's tool calls can be long, so every frame must be flushed
+// for the browser to receive it live (gin buffers by default + the Flusher interface)
 func flush(w http.ResponseWriter) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()

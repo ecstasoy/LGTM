@@ -16,16 +16,16 @@ import (
 )
 
 const (
-	// stateCookieName CSRF 状态 cookie；短 TTL 只在 OAuth 跳转期间存在
+	// stateCookieName is the CSRF state cookie; short TTL, exists only during the OAuth redirect
 	stateCookieName = "lgtm_oauth_state"
-	// nextCookieName 登录前的返回 URL；callback 后跳回去
+	// nextCookieName is the pre-login return URL, redirected back to after the callback
 	nextCookieName = "lgtm_oauth_next"
-	// stateCookieTTL OAuth 状态 cookie 寿命；5 分钟足够用户在 github.com 同意
+	// stateCookieTTL is the OAuth state cookie lifetime; 5 minutes is enough to consent on github.com
 	stateCookieTTL = 5 * time.Minute
 )
 
-// safeRedirectPath 防开放重定向：仅允许相对路径
-// "https://evil.com" → "/"；"/review/abc" → 原样返
+// safeRedirectPath blocks open redirects: relative paths only
+// "https://evil.com" → "/"; "/review/abc" → returned as-is
 func safeRedirectPath(next string) string {
 	if next == "" {
 		return "/"
@@ -37,7 +37,7 @@ func safeRedirectPath(next string) string {
 }
 
 // AuthLogin GET /api/auth/github/login?next=/path
-// 生成 state cookie + 重定向到 GitHub 授权页
+// Issues the state cookie and redirects to GitHub's authorization page
 func AuthLogin(oa *oauth.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if oa == nil || oa.ClientID == "" {
@@ -50,9 +50,9 @@ func AuthLogin(oa *oauth.Client) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "state gen failed"})
 			return
 		}
-		// state 走 short-lived HttpOnly cookie；SameSite=Lax 允许 GitHub 302 回来时带上
+		// state travels in a short-lived HttpOnly cookie; SameSite=Lax lets it ride along on GitHub's 302 back
 		setCookie(c, stateCookieName, state, int(stateCookieTTL.Seconds()))
-		// 把 next 也存 cookie（避免塞到 state 里）
+		// next is stored in a cookie too (rather than stuffed into state)
 		next := safeRedirectPath(c.Query("next"))
 		setCookie(c, nextCookieName, next, int(stateCookieTTL.Seconds()))
 
@@ -61,7 +61,7 @@ func AuthLogin(oa *oauth.Client) gin.HandlerFunc {
 }
 
 // AuthCallback GET /api/auth/github/callback?code=&state=
-// 校验 state → 换 token → 拿用户 → 建 session → 写 cookie → 跳回 next
+// Verify state → exchange for a token → fetch the user → create a session → set the cookie → redirect to next
 func AuthCallback(oa *oauth.Client, sm *session.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if oa == nil || sm == nil {
@@ -69,7 +69,7 @@ func AuthCallback(oa *oauth.Client, sm *session.Manager) gin.HandlerFunc {
 			return
 		}
 
-		// 验 state（防 CSRF）
+		// verify state (CSRF guard)
 		gotState := c.Query("state")
 		wantState, _ := c.Cookie(stateCookieName)
 		clearCookie(c, stateCookieName)
@@ -104,7 +104,7 @@ func AuthCallback(oa *oauth.Client, sm *session.Manager) gin.HandlerFunc {
 			return
 		}
 
-		// 建 session
+		// create the session
 		sid, err := sm.Create(ctx, session.Session{
 			UserID:      u.ID,
 			Login:       u.Login,
@@ -118,10 +118,10 @@ func AuthCallback(oa *oauth.Client, sm *session.Manager) gin.HandlerFunc {
 			return
 		}
 
-		// 写 session cookie
+		// set the session cookie
 		setCookie(c, session.CookieName, sid, int(sm.TTL().Seconds()))
 
-		// 取回 next，清掉 cookie
+		// read next back, then clear the cookie
 		next, _ := c.Cookie(nextCookieName)
 		clearCookie(c, nextCookieName)
 		next = safeRedirectPath(next)
@@ -132,7 +132,7 @@ func AuthCallback(oa *oauth.Client, sm *session.Manager) gin.HandlerFunc {
 }
 
 // AuthLogout POST /api/auth/logout
-// 删 session + 清 cookie；幂等
+// Deletes the session and clears the cookie; idempotent
 func AuthLogout(sm *session.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sid, _ := c.Cookie(session.CookieName)
@@ -155,30 +155,30 @@ func randomState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// setCookie 统一 cookie 写入：HttpOnly + SameSite=Lax + Secure（生产）
-// Path=/ 让前端任何路径都能带上
-// Domain 留空：浏览器自动绑当前域（Vercel rewrite 后 = vercel.app）
+// setCookie is the single place cookies are written: HttpOnly + SameSite=Lax + Secure (in production)
+// Path=/ so the frontend sends it from any path
+// Domain is left empty: the browser binds it to the current domain (after the Vercel rewrite that is vercel.app)
 func setCookie(c *gin.Context, name, value string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(name, value, maxAge, "/", "", isSecure(c), true)
 }
 
-// clearCookie max-age=-1 立刻过期
+// clearCookie expires immediately via max-age=-1
 func clearCookie(c *gin.Context, name string) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(name, "", -1, "/", "", isSecure(c), true)
 }
 
-// isSecure 判断当前请求是 HTTPS（生产）或 HTTP（本地 dev）
-// 走反代时看 X-Forwarded-Proto；TrustedProxies 已经设过让 c.Request.TLS 不可靠
-// 因此显式读 Forwarded-Proto
+// isSecure reports whether this request is HTTPS (production) or HTTP (local dev)
+// Behind a reverse proxy it reads X-Forwarded-Proto; TrustedProxies is already configured, which makes c.Request.TLS unreliable,
+// so Forwarded-Proto is read explicitly
 func isSecure(c *gin.Context) bool {
 	if c.Request.TLS != nil {
 		return true
 	}
 	proto := c.GetHeader("X-Forwarded-Proto")
 	if proto == "" {
-		// 解析 Forwarded 头（RFC 7239）作 fallback
+		// parse the Forwarded header (RFC 7239) as a fallback
 		fwd := c.GetHeader("Forwarded")
 		if strings.Contains(strings.ToLower(fwd), "proto=https") {
 			return true
@@ -187,8 +187,8 @@ func isSecure(c *gin.Context) bool {
 	return strings.EqualFold(proto, "https")
 }
 
-// CurrentSession 从 gin.Context 取当前 session；中间件设置；handler 用
-// 未登录返 nil
+// CurrentSession pulls the current session off the gin.Context; set by middleware, read by handlers
+// Returns nil when not logged in
 func CurrentSession(c *gin.Context) *session.Session {
 	v, ok := c.Get(sessionCtxKey)
 	if !ok {
@@ -198,6 +198,6 @@ func CurrentSession(c *gin.Context) *session.Session {
 	return s
 }
 
-// sessionCtxKey gin Context 里存 *session.Session 的 key
-// 与 middleware.AuthCtx 约定相同字符串（避免循环 import 直接 reference）
+// sessionCtxKey is the gin Context key holding a *session.Session
+// The same literal string as middleware.AuthCtx (referencing it directly would create an import cycle)
 const sessionCtxKey = "_lgtm_session"

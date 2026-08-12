@@ -7,12 +7,12 @@ import (
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
 )
 
-// detectPrimaryLang 按文件名后缀多数派算 PR 的主语言，给 /history 的语言筛选段控用。
-// 规则：
-//   - 跳过常见 lockfile（package-lock.json / go.sum / Cargo.lock 等），它们行数大但语义"非代码"
-//   - 仅在 langByExt 表里查；未列出后缀（.md / .txt / .yml 等）不计入
-//   - 计票按"文件数"而非加减行数，避免单 PR 内一个大文档 PR 抢了语言标签
-//   - 完全无可识别语言时返 ""
+// detectPrimaryLang picks a PR's primary language by majority vote over file extensions, for the /history language filter segment.
+// Rules:
+// - skip common lockfiles (package-lock.json / go.sum / Cargo.lock, etc.); they are large in line count but semantically not code
+// - only extensions in the langByExt table count; anything unlisted (.md / .txt / .yml, etc.) is ignored
+// - votes are counted per file, not per changed line, so one big document cannot steal the language label for a whole PR
+// - returns "" when nothing recognizable is found
 func detectPrimaryLang(files []gh.File) string {
 	counts := map[string]int{}
 	for _, f := range files {
@@ -28,7 +28,7 @@ func detectPrimaryLang(files []gh.File) string {
 	var best string
 	var bestCount int
 	for lang, count := range counts {
-		// 同票时按字母序固定（test 稳定性 + 用户感知一致）
+		// break ties alphabetically for a fixed result (test stability + consistent user perception)
 		if count > bestCount || (count == bestCount && lang < best) {
 			best = lang
 			bestCount = count
@@ -37,8 +37,8 @@ func detectPrimaryLang(files []gh.File) string {
 	return best
 }
 
-// langByExt 后缀 → 用户面前显示用的语言名。
-// 命名沿用 GitHub Linguist 主流社区写法（"Go" 不 "Golang"，"C#" 不 "CSharp"），方便前端段控直接展示。
+// langByExt maps an extension to the language name shown to users.
+// Naming follows the mainstream GitHub Linguist spelling ("Go" not "Golang", "C#" not "CSharp") so the frontend segment can display it directly.
 var langByExt = map[string]string{
 	".go":     "Go",
 	".ts":     "TypeScript",
@@ -100,8 +100,8 @@ var langByExt = map[string]string{
 	".svelte": "Svelte",
 }
 
-// ignoreLockfiles 计票时跳过的"非代码"高频文件名。
-// 不跳后缀（.lock 太宽泛），按文件名匹配最准。
+// ignoreLockfiles lists the high-frequency non-code filenames skipped when counting votes.
+// Matching is by filename rather than extension (.lock is far too broad).
 var ignoreLockfiles = map[string]bool{
 	"package-lock.json": true,
 	"pnpm-lock.yaml":    true,

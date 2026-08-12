@@ -11,7 +11,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/index"
 )
 
-// stubIndexer 记录 UpsertMany 调用，便于 assert chunk 内容
+// stubIndexer records UpsertMany calls so chunk contents can be asserted
 type stubIndexer struct {
 	mu     sync.Mutex
 	calls  int
@@ -30,16 +30,16 @@ func (s *stubIndexer) UpsertMany(_ context.Context, scope string, chunks []index
 }
 
 func TestIndexPRChunks_NoopIndexerSkipsCall(t *testing.T) {
-	// NoopIndexer 应直接 short-circuit，避免无谓 embedding API 调用
+	// NoopIndexer should short-circuit outright, avoiding a pointless embedding API call
 	pr := gh.PullRequest{
 		Owner: "o", Repo: "r", Number: 1,
 		Files: []gh.File{{Path: "a.go", Patch: "diff..."}},
 	}
-	indexPRChunks(context.Background(), index.NoopIndexer{}, pr) // 无 panic 即通过
+	indexPRChunks(context.Background(), index.NoopIndexer{}, pr) // passes as long as it does not panic
 }
 
 func TestIndexPRChunks_EmptyPatchesNoUpsert(t *testing.T) {
-	// 所有 file.Patch 为空（如 binary file）应该不触发 UpsertMany
+	// when every file.Patch is empty (a binary file, say) UpsertMany should not fire
 	idx := &stubIndexer{}
 	pr := gh.PullRequest{
 		Owner: "o", Repo: "r", Number: 1,
@@ -52,7 +52,7 @@ func TestIndexPRChunks_EmptyPatchesNoUpsert(t *testing.T) {
 }
 
 func TestIndexPRChunks_HappyPath(t *testing.T) {
-	// 正常 patch → 一文件一 chunk，scope = owner/repo
+	// a normal patch → one chunk per file, scope = owner/repo
 	idx := &stubIndexer{}
 	pr := gh.PullRequest{
 		Owner: "acme", Repo: "widget", Number: 42,
@@ -82,7 +82,7 @@ func TestIndexPRChunks_HappyPath(t *testing.T) {
 }
 
 func TestIndexPRChunks_TruncatesLongPatch(t *testing.T) {
-	// 超过 indexMaxChunkChars 的 patch 截断；防 embedding token 上限报错
+	// a patch past indexMaxChunkChars is truncated, which keeps the embedding token limit from erroring
 	long := strings.Repeat("x", indexMaxChunkChars+500)
 	idx := &stubIndexer{}
 	pr := gh.PullRequest{
@@ -99,13 +99,13 @@ func TestIndexPRChunks_TruncatesLongPatch(t *testing.T) {
 	}
 }
 
-// TestSplitPatchToHunks 验证多 @@ 头按 hunk 切；fallback 单 hunk；空跳过
+// TestSplitPatchToHunks covers splitting on multiple @@ headers, the single-hunk fallback, and skipping empties
 func TestSplitPatchToHunks(t *testing.T) {
 	cases := []struct {
 		name   string
 		patch  string
 		wantN  int
-		wantP0 string // 第一个 hunk 头部
+		wantP0 string // the first hunk's header
 	}{
 		{
 			"two hunks",
@@ -140,7 +140,7 @@ func TestSplitPatchToHunks(t *testing.T) {
 	}
 }
 
-// TestIndexPRChunks_MultiHunkFile 一个文件含 2 个 hunk → 应产 2 chunks，Idx=0/1
+// TestIndexPRChunks_MultiHunkFile: one file with 2 hunks → 2 chunks, Idx=0/1
 func TestIndexPRChunks_MultiHunkFile(t *testing.T) {
 	si := &stubIndexer{}
 	pr := gh.PullRequest{
@@ -170,13 +170,13 @@ func TestIndexPRChunks_MultiHunkFile(t *testing.T) {
 }
 
 func TestIndexPRChunks_UpsertErrorDoesNotPanic(t *testing.T) {
-	// 索引失败仅 warn，不阻塞评审流程；helper 不返 error 不应 panic
+	// an indexing failure only warns and never blocks the review; the helper returns no error and must not panic
 	idx := &stubIndexer{err: errors.New("embed quota exceeded")}
 	pr := gh.PullRequest{
 		Owner: "o", Repo: "r", Number: 1,
 		Files: []gh.File{{Path: "a.go", Patch: "diff"}},
 	}
-	indexPRChunks(context.Background(), idx, pr) // 应 swallow err
+	indexPRChunks(context.Background(), idx, pr) // should swallow the error
 	if idx.calls != 1 {
 		t.Fatalf("expected 1 call even on err, got %d", idx.calls)
 	}

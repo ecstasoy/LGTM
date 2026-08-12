@@ -21,15 +21,15 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/review"
 )
 
-// WebhookPR GitHub pull_request webhook payload 字段子集
-// 只取触发评审需要的；忽略 base/head ref 等大段
+// WebhookPR is the subset of GitHub pull_request webhook payload fields we use
+// Only what is needed to trigger a review; base/head ref and other large blocks are ignored
 type WebhookPR struct {
 	Action      string `json:"action"`
 	Number      int    `json:"number"`
 	PullRequest struct {
 		HTMLURL string `json:"html_url"`
 		Title   string `json:"title"`
-		HeadSHA string `json:"-"` // 后端 Fetch 时拿
+		HeadSHA string `json:"-"` // filled in by the backend during Fetch
 		User    struct {
 			Login string `json:"login"`
 		} `json:"user"`
@@ -48,8 +48,8 @@ type WebhookPR struct {
 	} `json:"sender"`
 }
 
-// WebhookIssueComment issue_comment 事件 payload；PR 在 GitHub 也算 Issue
-// issue.pull_request 字段非空 → 该 comment 是发在 PR 上
+// WebhookIssueComment is the issue_comment event payload; on GitHub a PR is also an Issue
+// a non-empty issue.pull_request field → the comment was made on a PR
 type WebhookIssueComment struct {
 	Action string `json:"action"`
 	Issue  struct {
@@ -57,11 +57,11 @@ type WebhookIssueComment struct {
 		HTMLURL     string `json:"html_url"`
 		Title       string `json:"title"`
 		User        struct {
-			Login string `json:"login"` // PR 作者；slash 触发时也通知 ta
+			Login string `json:"login"` // PR author; also notified when a slash command triggers the review
 		} `json:"user"`
 		PullRequest *struct {
 			URL     string `json:"url"`      // API URL
-			HTMLURL string `json:"html_url"` // 用户面 URL
+			HTMLURL string `json:"html_url"` // user-facing URL
 		} `json:"pull_request"`
 	} `json:"issue"`
 	Comment struct {
@@ -85,9 +85,9 @@ type WebhookIssueComment struct {
 	} `json:"sender"`
 }
 
-// allowedPRActions PR 事件中触发自动评审的 action 白名单
-// opened: 新 PR；synchronize: push 新 commit（head_sha 改）；reopened: 重开
-// 其它 action（closed / merged / labeled / ...）不触发
+// allowedPRActions is the allowlist of PR event actions that trigger an automatic review
+// opened: new PR; synchronize: new commit pushed (head_sha changed); reopened: reopened
+// any other action (closed / merged / labeled / ...) does not trigger
 var allowedPRActions = map[string]bool{
 	"opened":      true,
 	"synchronize": true,
@@ -96,11 +96,11 @@ var allowedPRActions = map[string]bool{
 
 // WebhookGitHub POST /api/webhook/github
 //
-// 安全：HMAC-SHA256 校验 X-Hub-Signature-256（用 GITHUB_APP_WEBHOOK_SECRET）
-// 事件路由：仅 pull_request.opened 触发；其它 204
-// 异步：respond 200 立刻；review 在 goroutine 跑（10-30s，超 GitHub 10s 重试阈值）
+// Security: HMAC-SHA256 verification of X-Hub-Signature-256 (using GITHUB_APP_WEBHOOK_SECRET)
+// Event routing: only pull_request.opened triggers; everything else gets 204
+// Async: respond 200 immediately; the review runs in a goroutine (10-30s, past GitHub's 10s retry threshold)
 //
-// 幂等：同 (owner, repo, pr, head_sha) 已有 review → 跳过；仅 push 通知
+// Idempotent: an existing review for the same (owner, repo, pr, head_sha) is skipped; only the notification is pushed
 func WebhookGitHub(d Deps, webhookSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := io.ReadAll(c.Request.Body)
@@ -109,7 +109,7 @@ func WebhookGitHub(d Deps, webhookSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// HMAC 校验：sha256=<hex>
+		// HMAC check: sha256=<hex>
 		sig := c.GetHeader("X-Hub-Signature-256")
 		if webhookSecret == "" {
 			slog.Warn("webhook: WEBHOOK_SECRET 未配；拒绝以防伪造")
@@ -136,7 +136,7 @@ func WebhookGitHub(d Deps, webhookSecret string) gin.HandlerFunc {
 	}
 }
 
-// handlePullRequestEvent opened / synchronize / reopened 都触发评审
+// handlePullRequestEvent triggers a review for opened / synchronize / reopened
 func handlePullRequestEvent(c *gin.Context, d Deps, body []byte) {
 	var p WebhookPR
 	if err := json.Unmarshal(body, &p); err != nil {
@@ -167,16 +167,16 @@ func handlePullRequestEvent(c *gin.Context, d Deps, body []byte) {
 		Title:          p.PullRequest.Title,
 		InstallationID: p.Installation.ID,
 		SenderLogin:    p.Sender.Login,
-		// PR author 也通知一份（synchronize 时 sender=pusher 可能不是 author）
-		// 同人时 PushNotification 内部 dedupe（其实不会，所以 caller 负责）
+		// notify the PR author too (on synchronize the sender is the pusher, who may not be the author)
+		// PushNotification dedupes internally when they are the same person (it does not, in fact, so the caller handles it)
 		PRAuthorLogin: p.PullRequest.User.Login,
-		TriggerAction: p.Action, // 给 bot review body 用（区分新评 vs 同步重评）
+		TriggerAction: p.Action, // used in the bot review body (distinguishes a fresh review from a re-review)
 	})
 }
 
-// handleIssueCommentEvent 解析 PR 评论里的 /lgtm <cmd> slash command
-// 触发条件：action=created + issue 是 PR + 评论体首行 /lgtm review
-// 防 bot 自己回评导致循环：sender.login 含 [bot] 后缀直接忽略
+// handleIssueCommentEvent parses /lgtm <cmd> slash commands in PR comments
+// Triggers on: action=created + the issue is a PR + the first line of the body is /lgtm review
+// Guards against the bot's own replies looping: a sender.login ending in [bot] is ignored outright
 func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 	var p WebhookIssueComment
 	if err := json.Unmarshal(body, &p); err != nil {
@@ -187,12 +187,12 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored_action": p.Action})
 		return
 	}
-	// PR comment only —— issue.pull_request 字段非空才是 PR
+	// PR comments only — it is a PR precisely when issue.pull_request is non-empty
 	if p.Issue.PullRequest == nil {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "non-PR issue comment"})
 		return
 	}
-	// 防自我循环：bot 自己的回复也是 issue_comment，会再来一次 webhook
+	// loop guard: the bot's own reply is also an issue_comment and would come back as another webhook
 	if strings.HasSuffix(p.Sender.Login, "[bot]") {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "bot sender"})
 		return
@@ -225,13 +225,13 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 	case "help":
 		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
 	default:
-		// 不识别的命令也回个 ack，提示可用列表
+		// ack unrecognized commands too, listing what is available
 		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
 	}
 }
 
-// parseSlashCommand 找 body 里第一行 /lgtm <cmd>，返 <cmd>；无返 ""
-// 大小写不敏感命令；忽略命令前空白
+// parseSlashCommand finds the first /lgtm <cmd> line in body and returns <cmd>; "" when there is none
+// Commands are case-insensitive; leading whitespace is ignored
 func parseSlashCommand(body string) string {
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
@@ -241,19 +241,19 @@ func parseSlashCommand(body string) string {
 		rest := strings.TrimSpace(strings.TrimPrefix(line, "/lgtm"))
 		fields := strings.Fields(rest)
 		if len(fields) == 0 {
-			return "review" // 裸 /lgtm 默认 review
+			return "review" // a bare /lgtm defaults to review
 		}
 		return strings.ToLower(fields[0])
 	}
 	return ""
 }
 
-// runSlashReview slash command 触发的重评；先 post ack comment，再跑评审
+// runSlashReview is the re-review triggered by a slash command; it posts an ack comment first, then runs the review
 func runSlashReview(d Deps, args slashReviewArgs) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// ack 评论用 installation token；让用户立刻看到「LGTM 已收到」
+	// the ack comment uses the installation token, so the user sees "LGTM got it" immediately
 	if d.OAuthClient != nil && d.OAuthClient.AppID != 0 && len(d.OAuthClient.PrivateKeyPEM) > 0 && args.InstallationID != 0 {
 		jwt, err := oauth.AppJWT(d.OAuthClient.AppID, d.OAuthClient.PrivateKeyPEM)
 		if err != nil {
@@ -266,7 +266,7 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		}
 	}
 
-	// 复用 runWebhookReview 的全套：fetch → 幂等检查 → index → review → bot review post
+	// reuses the whole runWebhookReview path: fetch → idempotency check → index → review → post bot review
 	runWebhookReview(d, webhookReviewArgs{
 		PrURL:          args.PrURL,
 		Owner:          args.Owner,
@@ -280,7 +280,7 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 	})
 }
 
-// runSlashHelp 不识别的命令时给用户列出可用命令
+// runSlashHelp lists the available commands when one is not recognized
 func runSlashHelp(d Deps, owner, repo string, prNumber int, installationID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -313,8 +313,8 @@ type slashReviewArgs struct {
 	PRAuthorLogin  string
 }
 
-// uniqueRecipients 通知收件人去重：空字符串过滤；同名只保留一份
-// 用于 PR author == sender 的常见情况（opened 时一致）
+// uniqueRecipients dedupes notification recipients: empty strings are dropped, duplicates collapse to one
+// Covers the common case of PR author == sender (they match on opened)
 func uniqueRecipients(logins ...string) []string {
 	seen := make(map[string]bool, len(logins))
 	out := make([]string, 0, len(logins))
@@ -335,19 +335,19 @@ type webhookReviewArgs struct {
 	Number         int
 	Title          string
 	InstallationID int64
-	// SenderLogin 触发本次事件的 GitHub 用户（push 的人 / 评论 /lgtm 的人）
+	// SenderLogin is the GitHub user who triggered this event (whoever pushed / commented /lgtm)
 	SenderLogin string
-	// PRAuthorLogin PR 作者；通常跟 SenderLogin 同（opened 时一致），
-	// 但 synchronize 时 sender=pusher 可能不是 author；slash 时 sender=commenter 也不一定是 author
-	// 通知两个人都推一份（caller 内部 dedupe）确保 PR 作者总能收到
+	// PRAuthorLogin is the PR author; usually the same as SenderLogin (they match on opened),
+	// but on synchronize the sender is the pusher, who may not be the author, and on a slash command the sender is the commenter, who also may not be
+	// both are notified (the caller dedupes) so the PR author always hears about it
 	PRAuthorLogin string
 	// TriggerAction "opened" / "synchronize" / "reopened" / "slash_review"；
-	// 用来在 bot review body 里区分文案（"已重评 push 的最新 commit" vs "首次评审"）
+	// used to vary the wording in the bot review body ("re-reviewed the latest pushed commit" vs "first review")
 	TriggerAction string
 }
 
-// runWebhookReview 后台跑评审 + 持久化 + push 通知 + post bot review
-// 任一步失败 log 但不重试（demo 简化；prod 加 queue + retry）
+// runWebhookReview runs the review in the background, then persists, pushes a notification and posts the bot review
+// A failure at any step is logged but not retried (demo simplification; production would add a queue + retry)
 func runWebhookReview(d Deps, args webhookReviewArgs) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -358,7 +358,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		return
 	}
 
-	// 幂等检查：同 (owner, repo, pr, head_sha) 已评 → 跳过
+	// idempotency check: an existing review for the same (owner, repo, pr, head_sha) → skip
 	if d.Store != nil {
 		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA); rec != nil {
 			slog.Info("webhook: cache hit, skipping re-review", "review_id", rec.ID)
@@ -374,7 +374,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		}
 	}
 
-	// 同步索引（同 manual review 路径）
+	// index inline (same as the manual review path)
 	if d.Indexer != nil {
 		indexPRChunks(ctx, d.Indexer, pr)
 	}
@@ -422,12 +422,12 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 
 	var reviewID string
 	if d.Store != nil {
-		// webhook 创建的 review owner = PR 作者（无登录上下文，按 PR meta 归属）
-		// 这样 PR 作者登录 lgtm.com 时能看到 + 删除自己仓库的自动评审
+		// a webhook-created review is owned by the PR author (there is no login context, so ownership follows PR meta)
+		// that way the PR author sees and can delete their own repo's automatic reviews once logged in to lgtm.com
 		reviewID = persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "webhook", args.PRAuthorLogin)
 	}
 
-	// Push bot review 回 PR（用 installation token）
+	// push the bot review back to the PR (using the installation token)
 	if reviewID != "" && d.OAuthClient != nil && d.OAuthClient.AppID != 0 && len(d.OAuthClient.PrivateKeyPEM) > 0 {
 		if err := postBotReview(ctx, d.OAuthClient, args.InstallationID, pr, reviewID, summaryBuf.String(), suggestionsData, args.TriggerAction); err != nil {
 			slog.Warn("webhook: post bot review failed", "err", err)
@@ -436,9 +436,9 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		slog.Info("webhook: skip bot review (App ID / private key not configured)")
 	}
 
-	// Push 通知给 sender + PR author（dedupe 同人）
-	// 一条 PR 评审能触发 toast 的人 = 触发事件的人 ∪ PR 作者
-	// 这样 PR 作者无论谁触发都看得到（同事 push 重评 / chat bot /lgtm 也通知 ta）
+	// notify the sender + the PR author (same person is deduped)
+	// the people a PR review can toast = whoever triggered the event ∪ the PR author
+	// so the PR author always sees it no matter who triggered it (a colleague pushing a re-review, a chat bot running /lgtm)
 	if reviewID != "" {
 		recipients := uniqueRecipients(args.SenderLogin, args.PRAuthorLogin)
 		for _, login := range recipients {
@@ -454,14 +454,14 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		"owner", pr.Owner, "repo", pr.Repo, "pr", pr.Number, "review_id", reviewID)
 }
 
-// postBotReview 用 installation token 以 App bot 身份发完整 review
-// summary 在 body + lgtm.com 链接；每条 suggestion 作 inline comment（含 ```suggestion 块）
+// postBotReview posts the full review as the App bot, using the installation token
+// The summary goes in the body along with an lgtm.com link; each suggestion becomes an inline comment (with a ```suggestion block)
 //
-// 整段流程：
-//  1. AppJWT 签名
-//  2. 换 installation token
-//  3. 解 suggestions JSON → 跳过缺 file/line 的（fork 文件名映射 issue）
-//  4. PostPRReview 一次性发完整 review
+// The whole flow:
+// 1. sign the AppJWT
+// 2. exchange it for an installation token
+// 3. parse the suggestions JSON → skip any missing file/line (fork filename mapping issue)
+// 4. PostPRReview sends the complete review in one call
 func postBotReview(
 	ctx context.Context,
 	c *oauth.Client,
@@ -508,8 +508,8 @@ func postBotReview(
 	return err
 }
 
-// buildBotReviewBody 摘要 + 评审统计 + 跳 lgtm.com 链接
-// trigger 区分文案：synchronize 时强调"已重评最新 push"；slash 时致谢 user 触发
+// buildBotReviewBody assembles the summary + review stats + a link out to lgtm.com
+// trigger varies the wording: synchronize emphasizes "re-reviewed the latest push", a slash command thanks the user who triggered it
 func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) string {
 	var sb strings.Builder
 	switch trigger {
@@ -534,7 +534,7 @@ func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) s
 	return sb.String()
 }
 
-// verifyHMAC GitHub 签名格式 "sha256=<hex>"；timing-safe 比较
+// verifyHMAC checks GitHub's "sha256=<hex>" signature format with a timing-safe comparison
 func verifyHMAC(sig string, body, secret []byte) bool {
 	const prefix = "sha256="
 	if !strings.HasPrefix(sig, prefix) {
@@ -557,8 +557,8 @@ func safePrefix(s string) string {
 	return s
 }
 
-// newNotifID 短 ulid-like id；ms 时间戳 + 随机后缀
-// 不用 ulid 库避免新增依赖；用 time.Now().UnixNano() + 简短 random
+// newNotifID is a short ulid-like id: a millisecond timestamp + a random suffix
+// Avoids a ulid dependency; uses time.Now().UnixNano() + a short random instead
 func newNotifID() string {
 	now := time.Now().UnixNano()
 	return fmt.Sprintf("%d-%d", now, now%1_000_000)

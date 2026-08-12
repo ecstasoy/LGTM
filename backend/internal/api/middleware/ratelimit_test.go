@@ -18,12 +18,12 @@ func init() {
 
 func newTestCache(t *testing.T) store.Cache {
 	t.Helper()
-	c := store.NewMemoryCache(time.Hour) // 测试期内不需要后台扫
+	c := store.NewMemoryCache(time.Hour) // no background sweep needed for the duration of a test
 	t.Cleanup(func() { _ = c.Close() })
 	return c
 }
 
-// 用极小 Max 验证 fixed window 真的拦截
+// use a tiny Max to prove the fixed window really blocks
 func TestRateLimit_AllowsBurstThenBlocks(t *testing.T) {
 	r := gin.New()
 	cache := newTestCache(t)
@@ -33,7 +33,7 @@ func TestRateLimit_AllowsBurstThenBlocks(t *testing.T) {
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 
-	// 同一 IP 先打两个，应放行；第三个应 429
+	// two from the same IP should pass; the third should be 429
 	for i := range 2 {
 		res, err := http.Get(srv.URL + "/x")
 		if err != nil {
@@ -59,7 +59,7 @@ func TestRateLimit_AllowsBurstThenBlocks(t *testing.T) {
 	}
 }
 
-// 不同 IP 应各自独立计数
+// different IPs should count independently
 func TestRateLimit_PerIPIsolation(t *testing.T) {
 	r := gin.New()
 	cache := newTestCache(t)
@@ -80,13 +80,13 @@ func TestRateLimit_PerIPIsolation(t *testing.T) {
 	if got := doReq("10.0.0.1"); got != 429 {
 		t.Fatalf("ip A second call should be 429, got %d", got)
 	}
-	// 不同 IP 的第一次仍应放行
+	// the first request from a different IP should still pass
 	if got := doReq("10.0.0.2"); got != 200 {
 		t.Fatalf("ip B first call should be 200, got %d (isolation broken)", got)
 	}
 }
 
-// 不同 Name 也应独立计数（同 IP 同时打两个端点不互相干扰）
+// different Names should count independently too (one IP hitting two endpoints must not interfere)
 func TestRateLimit_NamesAreIsolated(t *testing.T) {
 	r := gin.New()
 	cache := newTestCache(t)
@@ -109,13 +109,13 @@ func TestRateLimit_NamesAreIsolated(t *testing.T) {
 	if got := doReq("/a"); got != 429 {
 		t.Fatalf("second /a should 429, got %d", got)
 	}
-	// 同 IP 跑到 /b 上仍应放行（不同 name 独立窗口）
+	// the same IP on /b should still pass (a different name is a separate window)
 	if got := doReq("/b"); got != 200 {
 		t.Fatalf("first /b should pass (different name), got %d", got)
 	}
 }
 
-// cache=nil 时降级为 pass-through，不阻拦请求
+// with cache=nil it degrades to pass-through and blocks nothing
 func TestRateLimit_NilCachePassThrough(t *testing.T) {
 	r := gin.New()
 	r.Use(RateLimit(nil, RateLimitConfig{Name: "test", Window: time.Hour, Max: 1}))
@@ -129,7 +129,7 @@ func TestRateLimit_NilCachePassThrough(t *testing.T) {
 		return rec.Code
 	}
 
-	// 10 次都应放行（限流被禁用）
+	// all 10 should pass (rate limiting is disabled)
 	for i := range 10 {
 		if got := doReq(); got != 200 {
 			t.Errorf("nil cache should pass-through; req #%d got %d", i, got)

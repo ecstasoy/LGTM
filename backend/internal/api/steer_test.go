@@ -12,7 +12,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// seedSteerReview 写一条 cached review 给 steer 测试用：files 非空 + 完整 meta
+// seedSteerReview writes a cached review for the steer tests: non-empty files + complete meta
 func seedSteerReview(t *testing.T, s store.Store) string {
 	t.Helper()
 	payload, _ := json.Marshal(cachedPayload{
@@ -81,7 +81,7 @@ func TestSteer_RisksDefault_EmitsSteeredRisksDone(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"risks":[{"file":"main.go","line":3,"severity":"high","category":"concurrency","confidence":0.92,"reason":"并发写无锁"}]}`
 	srv := startTestServer(t, Deps{Provider: p, Store: s})
-	// 不指定 stage → 默认 risks
+	// no stage given → defaults to risks
 	res, body := postJSON(t, srv, "/api/review/"+id+"/steer", map[string]string{"text": "重点看并发安全"})
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)

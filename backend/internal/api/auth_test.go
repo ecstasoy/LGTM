@@ -18,8 +18,8 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// startAuthTestServer 起一个迷你 server 含 /api/auth/* + /api/me 路由
-// oauthSrv 是 mocked GitHub host，用 rewriteHost transport 把 OAuth client 流量转到这里
+// startAuthTestServer starts a mini server carrying the /api/auth/* + /api/me routes
+// oauthSrv is the mocked GitHub host; a rewriteHost transport points the OAuth client's traffic at it
 func startAuthTestServer(t *testing.T, oa *oauth.Client, sm *session.Manager) *httptest.Server {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -28,7 +28,7 @@ func startAuthTestServer(t *testing.T, oa *oauth.Client, sm *session.Manager) *h
 	g.GET("/auth/github/login", AuthLogin(oa))
 	g.GET("/auth/github/callback", AuthCallback(oa, sm))
 	g.POST("/auth/logout", AuthLogout(sm))
-	// /me 需要 middleware 注入 session；这里手动模拟最简版
+	// /me needs middleware to inject the session; this is the minimal hand-rolled equivalent
 	g.GET("/me", func(c *gin.Context) {
 		sid, _ := c.Cookie(session.CookieName)
 		if sid != "" && sm != nil {
@@ -48,7 +48,7 @@ func TestAuthLogin_RedirectsToGithubWithStateCookie(t *testing.T) {
 	sm := session.New(nil, 0)
 	srv := startAuthTestServer(t, oa, sm)
 
-	// 不跟随 302
+	// do not follow the 302
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, err := client.Get(srv.URL + "/api/auth/github/login?next=/review/abc")
 	if err != nil {
@@ -63,7 +63,7 @@ func TestAuthLogin_RedirectsToGithubWithStateCookie(t *testing.T) {
 	if !strings.HasPrefix(loc, "https://github.com/login/oauth/authorize?") {
 		t.Errorf("Location=%s, want GitHub authorize URL", loc)
 	}
-	// state 在 query + cookie 都得有，且相等
+	// state has to be present in both the query and the cookie, and they have to match
 	u, _ := url.Parse(loc)
 	stateInQuery := u.Query().Get("state")
 	if stateInQuery == "" {
@@ -78,7 +78,7 @@ func TestAuthLogin_RedirectsToGithubWithStateCookie(t *testing.T) {
 			nextCookie = c
 		}
 	}
-	// gin.Context.SetCookie 会对 value 做 url.QueryEscape，比对前先 unescape
+	// gin.Context.SetCookie url.QueryEscapes the value, so unescape before comparing
 	if stateCookie == nil {
 		t.Fatal("state cookie missing")
 	}
@@ -115,7 +115,7 @@ func TestAuthLogin_NextSanitizes(t *testing.T) {
 	srv := startAuthTestServer(t, oa, session.New(nil, 0))
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-	// 试图开放重定向到外部域，必须被消毒为 /
+	// an attempted open redirect to an external domain must be sanitized to /
 	res, err := client.Get(srv.URL + "/api/auth/github/login?next=https://evil.com")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -132,7 +132,7 @@ func TestAuthLogin_NextSanitizes(t *testing.T) {
 }
 
 func TestAuthCallback_FullFlow(t *testing.T) {
-	// mock GitHub：处理 /login/oauth/access_token + /user
+	// mock GitHub: handles /login/oauth/access_token + /user
 	githubSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/login/oauth/access_token":
@@ -159,12 +159,12 @@ func TestAuthCallback_FullFlow(t *testing.T) {
 	sm := session.New(cache, 0)
 	srv := startAuthTestServer(t, oa, sm)
 
-	// 模拟 GitHub 302 回来：必须带 state cookie + 同 state query
+	// simulate GitHub's 302 back: it must carry the state cookie + the same state query
 	client := &http.Client{
 		Jar:           newCookieJar(t),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	// 1) 先 /login 拿 state cookie
+	// 1) hit /login first to get the state cookie
 	res1, err := client.Get(srv.URL + "/api/auth/github/login?next=/review/x")
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -180,7 +180,7 @@ func TestAuthCallback_FullFlow(t *testing.T) {
 		t.Fatal("state cookie not set by /login")
 	}
 
-	// 2) 模拟 /callback?code=abc&state=<same>
+	// 2) simulate /callback?code=abc&state=<same>
 	res2, err := client.Get(srv.URL + "/api/auth/github/callback?code=abc&state=" + state)
 	if err != nil {
 		t.Fatalf("callback: %v", err)
@@ -193,7 +193,7 @@ func TestAuthCallback_FullFlow(t *testing.T) {
 	if loc := res2.Header.Get("Location"); loc != "/review/x" {
 		t.Errorf("callback Location=%q want /review/x", loc)
 	}
-	// session cookie 应被设
+	// the session cookie should be set
 	var sessCookie *http.Cookie
 	for _, c := range client.Jar.Cookies(mustURL(srv.URL)) {
 		if c.Name == session.CookieName {
@@ -204,7 +204,7 @@ func TestAuthCallback_FullFlow(t *testing.T) {
 		t.Fatal("session cookie not set after callback")
 	}
 
-	// 3) /me 应返回登录信息
+	// 3) /me should return the login info
 	res3, err := client.Get(srv.URL + "/api/me")
 	if err != nil {
 		t.Fatalf("me: %v", err)
@@ -222,7 +222,7 @@ func TestAuthCallback_RejectsStateMismatch(t *testing.T) {
 	sm := session.New(nil, 0)
 	srv := startAuthTestServer(t, oa, sm)
 
-	// 不预先 /login → state cookie 缺；callback 必须拒
+	// no preceding /login → the state cookie is missing, so the callback must reject
 	res, err := http.Get(srv.URL + "/api/auth/github/callback?code=abc&state=wrong")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -250,7 +250,7 @@ func TestAuthLogout_ClearsCookieAndSession(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status=%d want 200", res.StatusCode)
 	}
-	// session 应被删
+	// the session should be deleted
 	got, _ := sm.Get(t.Context(), sid)
 	if got != nil {
 		t.Error("session should be deleted after logout")
@@ -271,7 +271,7 @@ func TestGetMe_UnauthenticatedReturnsFalseField(t *testing.T) {
 	}
 }
 
-// --- 工具 ---
+// --- helpers ---
 
 func newCookieJar(t *testing.T) *cookiejar.Jar {
 	t.Helper()
@@ -290,7 +290,7 @@ func mustURL(s string) *url.URL {
 	return u
 }
 
-// rewriteHost 复用 oauth/github_test.go 的私有 type；这里独立一份避免跨包导出
+// rewriteHost reuses the private type from oauth/github_test.go; kept as a separate copy here rather than exported across packages
 type rewriteHost struct {
 	base string
 }

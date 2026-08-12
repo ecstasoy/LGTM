@@ -12,8 +12,8 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// Notification 一条「PR 自动评完了」的 in-app 通知
-// Webhook 触发评审完成后塞进 user 的 cache 列表；前端轮询 /api/notifications 拉取
+// Notification is one in-app "the PR review finished" notification
+// A webhook-triggered review drops one into the user's cache list on completion; the frontend polls /api/notifications for them
 type Notification struct {
 	ID        string `json:"id"`
 	ReviewID  string `json:"review_id"`
@@ -26,19 +26,19 @@ type Notification struct {
 }
 
 const (
-	// notifCacheKeyPrefix Cache 里通知列表的 key 前缀
+	// notifCacheKeyPrefix is the key prefix for notification lists in Cache
 	notifCacheKeyPrefix = "notif:"
-	// notifTTL 通知保留 7 天；超过即删（用户没看就过期）
+	// notifTTL keeps notifications for 7 days, then drops them (unread ones expire too)
 	notifTTL = 7 * 24 * time.Hour
-	// notifMaxPerUser 单用户最多保留 50 条；新来的把老的挤掉
+	// notifMaxPerUser keeps at most 50 per user; new ones push out the old
 	notifMaxPerUser = 50
 )
 
-// notifKey 按用户 login 隔离 cache key
+// notifKey namespaces the cache key by user login
 func notifKey(login string) string { return notifCacheKeyPrefix + login }
 
-// PushNotification 往 user 的通知列表里追加一条；满 50 条丢最早的
-// cache 故障仅 warn —— 通知是 nice-to-have 不该阻塞业务
+// PushNotification appends one to the user's list; at 50 the oldest is dropped
+// A cache failure only warns — notifications are nice-to-have and should never block the main flow
 func PushNotification(ctx context.Context, cache store.Cache, login string, n Notification) {
 	if cache == nil || login == "" {
 		return
@@ -50,13 +50,13 @@ func PushNotification(ctx context.Context, cache store.Cache, login string, n No
 	raw, _, err := cache.Get(ctx, key)
 	if err != nil {
 		slog.Warn("notif get existing failed", "err", err, "login", login)
-		// 继续，按 fresh 处理
+		// carry on and treat it as fresh
 	}
 	var existing []Notification
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &existing)
 	}
-	// 新的 push 到前面（按时间倒序）
+	// new ones go to the front (newest first)
 	existing = append([]Notification{n}, existing...)
 	if len(existing) > notifMaxPerUser {
 		existing = existing[:notifMaxPerUser]
@@ -68,8 +68,8 @@ func PushNotification(ctx context.Context, cache store.Cache, login string, n No
 }
 
 // GetNotifications GET /api/notifications?since=<id>
-// 返当前登录用户的通知列表；since 非空时只返比这条更新的（按时间倒序后取前面）
-// since 让前端 poll 时只拿增量，避免重复弹 toast
+// Returns the logged-in user's notifications; a non-empty since returns only the ones newer than it (taken from the front of the newest-first order)
+// since lets the frontend poll for the delta only, so it does not re-toast the same notification
 func GetNotifications() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s := CurrentSession(c)
@@ -98,7 +98,7 @@ func GetNotifications() gin.HandlerFunc {
 			c.JSON(http.StatusOK, []Notification{})
 			return
 		}
-		// since 过滤
+		// since filter
 		since := c.Query("since")
 		if since != "" {
 			cut := -1
@@ -116,13 +116,13 @@ func GetNotifications() gin.HandlerFunc {
 	}
 }
 
-// getCache 从 gin context 拿 store.Cache（main 接线塞进 Deps；中间件不能直接拿因 deps 不在 ctx）
-// 解法：handler 用 router 注入；这里走 closure 而非 ctx
-// 实际上 GetNotifications 应该用 closure，重写：
-// （此函数留作 placeholder，被下面 GetNotificationsHandler 替代）
+// getCache pulls store.Cache out of the gin context (main wires it into Deps; middleware cannot reach it because deps are not on the ctx)
+// Workaround: the handler is injected by the router, so this goes through a closure rather than the ctx
+// In practice GetNotifications should use the closure form, rewritten below:
+// (this function stays as a placeholder, superseded by GetNotificationsHandler below)
 func getCache(_ *gin.Context) store.Cache { return nil }
 
-// GetNotificationsHandler 把 cache 通过 closure 注入，handler 真能用
+// GetNotificationsHandler injects cache through a closure, so the handler can actually use it
 func GetNotificationsHandler(cache store.Cache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s := CurrentSession(c)
@@ -150,7 +150,7 @@ func GetNotificationsHandler(cache store.Cache) gin.HandlerFunc {
 			c.JSON(http.StatusOK, []Notification{})
 			return
 		}
-		// since 过滤
+		// since filter
 		since := c.Query("since")
 		if since != "" {
 			cut := -1

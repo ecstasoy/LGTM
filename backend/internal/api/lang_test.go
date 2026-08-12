@@ -29,7 +29,7 @@ func TestDetectPrimaryLang(t *testing.T) {
 			files: []gh.File{
 				{Path: "internal/cache/shard.go"},
 				{Path: "internal/cache/ttl.go"},
-				{Path: "README.md"}, // .md 不在 langByExt，不计票
+				{Path: "README.md"}, // .md is not in langByExt, so it does not vote
 			},
 			want: "Go",
 		},
@@ -45,7 +45,7 @@ func TestDetectPrimaryLang(t *testing.T) {
 		{
 			name: "lockfile ignored",
 			files: []gh.File{
-				{Path: "package-lock.json"},   // 跳过，否则 .json 也未列出（不计）
+				{Path: "package-lock.json"},   // skipped; without that, .json is unlisted anyway (no vote)
 				{Path: "src/index.ts"},
 			},
 			want: "TypeScript",
@@ -82,7 +82,7 @@ func TestDetectPrimaryLang(t *testing.T) {
 				{Path: "a.go"},
 				{Path: "b.py"},
 			},
-			want: "Go", // 平票时按字母序固定
+			want: "Go", // ties break alphabetically
 		},
 		{
 			name: "tie Python vs Rust (Python before Rust)",

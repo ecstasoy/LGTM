@@ -14,8 +14,8 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/review"
 )
 
-// AdoptResponse POST /api/review/:id/comment/:idx 成功返回
-// HTMLURL 让前端给用户直接跳到 GitHub 上看新发的 comment
+// AdoptResponse is the success response of POST /api/review/:id/comment/:idx
+// HTMLURL lets the frontend send the user straight to the new comment on GitHub
 type AdoptResponse struct {
 	OK        bool   `json:"ok"`
 	CommentID int64  `json:"comment_id,omitempty"`
@@ -24,16 +24,16 @@ type AdoptResponse struct {
 
 // PostAdoptComment POST /api/review/:id/comment/:idx
 //
-// 把缓存里第 idx 条 Suggestion 转成 GitHub PR review comment 发出去
-// body 含 ```suggestion 代码块 → PR author 在 GitHub UI 一键 "Apply suggestion" commit
+// Turns suggestion idx from the cache into a GitHub PR review comment and posts it
+// The body contains a ```suggestion block → the PR author gets one-click "Apply suggestion" commit in the GitHub UI
 //
-// 路径检查链：
-//  1. session 存在（401）
-//  2. review 存在（404）
-//  3. idx 合法（400）
-//  4. OAuth 配齐（503）
-//  5. 用户有 comment 权限（403）
-//  6. GitHub API 成功（502 + 透传 GitHub 错误信息）
+// Check chain:
+// 1. session exists (401)
+// 2. review exists (404)
+// 3. idx is in range (400)
+// 4. OAuth is configured (503)
+// 5. the user may comment (403)
+// 6. the GitHub API call succeeded (502 + GitHub's error message passed through)
 func PostAdoptComment(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s := CurrentSession(c)
@@ -71,7 +71,7 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 解析 payload 拿 suggestion list
+		// parse the payload for the suggestion list
 		var payload cachedPayload
 		if err := json.Unmarshal(rec.Payload, &payload); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "payload: " + err.Error()})
@@ -94,7 +94,7 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 权限校验：缺权限直接 403（带 reason）
+		// permission check: missing permission is a straight 403 (with a reason)
 		perm, err := d.OAuthClient.GetRepoPermission(ctx, s.AccessToken, rec.Owner, rec.Repo, s.Login)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "perm check failed: " + err.Error()})
@@ -108,7 +108,7 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 			return
 		}
 
-		// 构造 comment body：title + body + ```suggestion 块 + 出处 footer
+		// build the comment body: title + body + ```suggestion block + provenance footer
 		body := buildSuggestionCommentBody(sg)
 
 		cm, err := d.OAuthClient.PostPRComment(ctx, s.AccessToken, rec.Owner, rec.Repo, rec.PRNumber,
@@ -123,11 +123,11 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 }
 
 // DeleteAdoptComment DELETE /api/review/:id/comment/:cid
-// :cid 是 GitHub PR review comment 的 databaseId（来自 PostAdoptComment 的返值）
-// 用户在 InlineSuggestion 的「已发到 PR」按钮旁可以「× 撤回」
+// :cid is the databaseId of the GitHub PR review comment (as returned by PostAdoptComment)
+// The user gets an "× withdraw" next to the "posted to PR" button on an InlineSuggestion
 //
-// 检查链：session → review 存在（用来推出 owner/repo）→ 调 GitHub DELETE
-// 不再 verify 用户对 review 的所有权（comment 作者校验交给 GitHub 拒）
+// Check chain: session → review exists (used to derive owner/repo) → call GitHub DELETE
+// Ownership of the review is deliberately not verified here; GitHub rejects it if the caller did not author the comment
 func DeleteAdoptComment(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s := CurrentSession(c)
@@ -168,9 +168,9 @@ func DeleteAdoptComment(d Deps) gin.HandlerFunc {
 	}
 }
 
-// buildSuggestionCommentBody 把一条 Suggestion 拼成 GitHub PR review comment 的 markdown
-// 关键：```suggestion 块只放 patch.after，GitHub 会自动算出与原代码的 diff 并支持一键 Apply
-// 缺 patch 时退化为纯文字建议（仍然有用，只是 PR author 要手动改）
+// buildSuggestionCommentBody renders one Suggestion as GitHub PR review comment markdown
+// The key part: the ```suggestion block holds only patch.after, and GitHub works out the diff against the original and offers one-click Apply
+// With no patch it degrades to a plain text suggestion (still useful, the PR author just edits by hand)
 func buildSuggestionCommentBody(s review.Suggestion) string {
 	var sb strings.Builder
 	sb.WriteString("**")
