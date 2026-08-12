@@ -88,7 +88,7 @@ export const en: Dict = {
   },
   history: {
     title: "Review history",
-    countLabel: (n: number) => `${n} reviews · SHA-cached for instant replay`,
+    countLabel: (n: number) => `${n} ${n === 1 ? "review" : "reviews"} · SHA-cached for instant load`,
     searchPlaceholder: "Search repo or title…",
     colRepo: "Repo / PR",
     colTitle: "Title",
