@@ -288,7 +288,7 @@ function InfoTab({ pr }: { pr: PrMeta }) {
             />
             <span className="font-mono text-text-2">{pr.author}</span>
             {pr.author_role ? (
-              <span className="text-[10px] text-faint">{formatAuthorRole(pr.author_role)}</span>
+              <span className="text-[10px] text-faint">{formatAuthorRole(pr.author_role, t)}</span>
             ) : null}
           </span>
         </InfoRow>

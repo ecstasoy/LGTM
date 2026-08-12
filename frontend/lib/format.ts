@@ -1,17 +1,18 @@
-// formatAuthorRole 把 GitHub author_association 枚举翻成中文显示
-// 后端透传原始值（OWNER / CONTRIBUTOR / 等），UI 层做语言化
-const ROLE_LABELS: Record<string, string> = {
-  OWNER: "维护者",
-  MEMBER: "成员",
-  COLLABORATOR: "协作者",
-  CONTRIBUTOR: "贡献者",
-  FIRST_TIMER: "首次贡献",
-  FIRST_TIME_CONTRIBUTOR: "首次贡献",
-  MANNEQUIN: "Mannequin",
-  NONE: "",
-};
+import type { Dict } from "./i18n/dictionaries/zh";
 
-export function formatAuthorRole(role: string | undefined): string {
+// formatAuthorRole localizes the GitHub author_association enum for display.
+// The backend passes the raw value through (OWNER / CONTRIBUTOR / etc.); this is where it gets a language-specific label.
+export function formatAuthorRole(role: string | undefined, t: Dict): string {
   if (!role) return "";
-  return ROLE_LABELS[role.toUpperCase()] ?? role;
+  const labels: Record<string, string> = {
+    OWNER: t.ui.roleOwner,
+    MEMBER: t.ui.roleMember,
+    COLLABORATOR: t.ui.roleCollaborator,
+    CONTRIBUTOR: t.ui.roleContributor,
+    FIRST_TIMER: t.ui.roleFirstTimeContributor,
+    FIRST_TIME_CONTRIBUTOR: t.ui.roleFirstTimeContributor,
+    MANNEQUIN: t.ui.roleMannequin,
+    NONE: t.ui.roleNone,
+  };
+  return labels[role.toUpperCase()] ?? role;
 }

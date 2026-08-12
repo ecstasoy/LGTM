@@ -5,10 +5,11 @@ import Link from "next/link";
 import { ExternalLink, X, Zap } from "lucide-react";
 
 import { useNotifications, type Notification } from "@/lib/notifications";
+import { useT } from "@/lib/i18n/context";
 
-// ToastContainer 右下角浮窗；监听新 webhook 通知，弹出 + 6.5s 自动消失
-// 多条堆叠（最多 2 条同时显示），按时间倒序（最新在顶）
-// 刷新页面 useNotifications 走 baseline 静默路径不会重灌历史
+// ToastContainer: bottom-right popup that watches for new webhook notifications and shows them
+// for 6.5s. Stacks multiple at once (up to MAX_VISIBLE), newest on top.
+// useNotifications' silent baseline pass on refresh means it never floods the past week's backlog in at once.
 const MAX_VISIBLE = 2;
 
 export function ToastContainer() {
@@ -18,7 +19,7 @@ export function ToastContainer() {
   useEffect(() => {
     if (newOnes.length === 0) return;
     setVisible((prev) => {
-      // 防重复（多 tick 同条都 push）+ 限堆叠数
+      // Dedupe (multiple ticks can push the same entry) and cap the stack size.
       const seen = new Set(prev.map((p) => p.id));
       const fresh = newOnes.filter((n) => !seen.has(n.id));
       return [...fresh, ...prev].slice(0, MAX_VISIBLE);
@@ -41,10 +42,12 @@ export function ToastContainer() {
 }
 
 function ToastItem({ n, onClose }: { n: Notification; onClose: () => void }) {
-  // 5s 后自动消失
+  const t = useT();
+
+  // Auto-dismiss after 6.5s.
   useEffect(() => {
-    const t = window.setTimeout(onClose, 6500);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(onClose, 6500);
+    return () => window.clearTimeout(timer);
   }, [onClose]);
 
   return (
@@ -54,7 +57,7 @@ function ToastItem({ n, onClose }: { n: Notification; onClose: () => void }) {
           <Zap className="h-3 w-3" fill="currentColor" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold text-text">PR 已自动评审</div>
+          <div className="text-xs font-semibold text-text">{t.notifications.autoReviewedTitle}</div>
           <code className="block truncate font-mono text-[10.5px] text-text-2">
             {n.owner}/{n.repo}#{n.pr}
           </code>
@@ -66,7 +69,7 @@ function ToastItem({ n, onClose }: { n: Notification; onClose: () => void }) {
             className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-accent underline hover:opacity-80"
             onClick={onClose}
           >
-            查看完整评审
+            {t.notifications.viewFullReviewLink}
             <ExternalLink className="h-2.5 w-2.5" />
           </Link>
         </div>
@@ -74,7 +77,7 @@ function ToastItem({ n, onClose }: { n: Notification; onClose: () => void }) {
           type="button"
           onClick={onClose}
           className="shrink-0 text-muted hover:text-text"
-          aria-label="关闭"
+          aria-label={t.notifications.closeAriaLabel}
         >
           <X className="h-3 w-3" />
         </button>

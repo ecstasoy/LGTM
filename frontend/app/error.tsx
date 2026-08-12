@@ -4,9 +4,11 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 
-// app/error.tsx App Router 路由级错误边界。
-// 任何 client component 未捕获的 throw / promise reject 落到这里；
-// 不取代 review 页内的 stage 级 error banner——那里 ErrorBoundary 之上有自定义处理。
+import { useT } from "@/lib/i18n/context";
+
+// app/error.tsx: the App Router's route-level error boundary.
+// Catches any uncaught throw / promise rejection from a Client Component;
+// does not replace the review page's own stage-level error banner — that has its own handling above this boundary.
 export default function GlobalError({
   error,
   reset,
@@ -14,6 +16,8 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useT();
+
   useEffect(() => {
     // eslint-disable-next-line no-console
     console.error("Unhandled UI error", error);
@@ -24,9 +28,9 @@ export default function GlobalError({
       <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-high-bg text-high">
         <AlertTriangle className="h-6 w-6" />
       </div>
-      <h1 className="text-lg font-semibold">页面出错了</h1>
+      <h1 className="text-lg font-semibold">{t.errors.pageErrorTitle}</h1>
       <p className="mt-2 text-sm text-muted">
-        {error.message || "未知错误"}
+        {error.message || t.errors.pageErrorUnknown}
         {error.digest ? (
           <span className="ml-2 font-mono text-faint">[{error.digest}]</span>
         ) : null}
@@ -37,13 +41,13 @@ export default function GlobalError({
           onClick={() => reset()}
           className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90"
         >
-          重试
+          {t.review.retry}
         </button>
         <Link
           href="/"
           className="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 text-sm text-text-2 hover:bg-surface-hover hover:text-text"
         >
-          回到落地页
+          {t.errors.backToHome}
         </Link>
       </div>
     </section>

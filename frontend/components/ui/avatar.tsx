@@ -22,8 +22,8 @@ export interface AvatarProps extends VariantProps<typeof avatarVariants> {
   className?: string;
 }
 
-// Avatar 头像；src 优先；缺失则展示 name 首字母（fallback "?"）。
-// 不依赖 next/image —— GitHub avatar URL 通常带 ?s= 尺寸参数，img 直加即可。
+// Avatar: prefers src; falls back to the first letter of name (or "?") when missing.
+// Doesn't use next/image — GitHub avatar URLs usually carry a ?s= size param, so a plain img works fine.
 export function Avatar({ name, src, size, className }: AvatarProps) {
   const initial = (name?.trim()?.[0] ?? "?").toUpperCase();
   if (src) {

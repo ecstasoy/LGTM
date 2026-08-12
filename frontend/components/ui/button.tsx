@@ -3,8 +3,8 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
-// Button 风格紧贴 design_handoff 的 Btn：primary 用 accent；outline 用 surface + border-strong；
-// ghost 用透明背景 + hover surface-hover。所有色彩通过 globals.css 的 CSS 变量驱动主题切换。
+// Button follows design_handoff's Btn closely: primary uses accent; outline uses surface + border-strong;
+// ghost uses a transparent background + surface-hover on hover. All colors run through globals.css CSS variables to drive theme switching.
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg disabled:cursor-not-allowed disabled:opacity-50",
   {

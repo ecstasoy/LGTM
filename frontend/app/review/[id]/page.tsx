@@ -104,7 +104,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
 
   // perms：用 PR meta 查当前用户对 base repo 的权限；驱动 InlineSuggestion 的「评论 / 提交」按钮
   // pr 未到位时 owner/repo 是 undefined → usePerms skip fetch
-  const { perms, loading: permsLoading } = usePerms(pr?.owner, pr?.repo);
+  const { perms, loading: permsLoading } = usePerms(pr?.owner, pr?.repo, t);
 
   const scrollRef = useRef<HTMLElement>(null);
   const pendingScroll = useRef<string | null>(null);
@@ -160,7 +160,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           setSummaryDone(true);
         },
         onDone: () => !cancelled && (setSummaryDone(true), setStreaming(false)),
-      }, controller.signal, sourceModel, hasStageModels ? sourceStageModels : undefined)
+      }, t, controller.signal, sourceModel, hasStageModels ? sourceStageModels : undefined)
         .catch((e) => {
           if (e instanceof DOMException && e.name === "AbortError") return;
           if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -304,7 +304,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
         <Link href="/history" className="text-xs text-muted hover:text-text">
           {t.review.backToHistory}
         </Link>
-        <p className="text-sm text-fail">{friendlyError(error)}</p>
+        <p className="text-sm text-fail">{friendlyError(error, t)}</p>
         <button
           type="button"
           onClick={retry}

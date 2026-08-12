@@ -1,8 +1,11 @@
+"use client";
+
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/context";
 
-// Spinner 圆环旋转；color 用 currentColor 让 className 控（如 text-muted）
+// Spinner: a spinning ring; uses currentColor so className controls it (e.g. text-muted).
 const spinnerVariants = cva(
   "inline-block animate-spin rounded-full border-2 border-current border-t-transparent",
   {
@@ -20,14 +23,15 @@ const spinnerVariants = cva(
 
 export interface SpinnerProps extends VariantProps<typeof spinnerVariants> {
   className?: string;
-  label?: string; // a11y：屏幕阅读器看到的文本
+  label?: string; // a11y: text exposed to screen readers
 }
 
-export function Spinner({ size, className, label = "加载中" }: SpinnerProps) {
+export function Spinner({ size, className, label }: SpinnerProps) {
+  const t = useT();
   return (
     <span
       role="status"
-      aria-label={label}
+      aria-label={label ?? t.ui.loadingLabel}
       className={cn(spinnerVariants({ size }), className)}
     />
   );

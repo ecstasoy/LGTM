@@ -145,6 +145,7 @@ export function AgentPanel({ onClose, reviewId }: Props) {
             setMsgs((m) => [...m, { role: "assistant", text: `❌ ${msg}` }]);
           },
         },
+        t,
         controller.signal,
         "agent",
       );

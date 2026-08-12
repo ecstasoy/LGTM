@@ -228,6 +228,7 @@ export function AgentSessionView({
             },
             onStageError: (_s, msg) => markError(msg),
           },
+          t,
           undefined,
           mode,
         );
@@ -256,6 +257,7 @@ export function AgentSessionView({
       onSteerInfo,
       onSteerToolCallDone,
       onSteerToolCallStart,
+      t,
     ],
   );
 

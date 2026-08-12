@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
-// FileStatusBadge GitHub 风格的单字母方块：A/M/D/R + 色块
-// status 字符串来自后端 gh.File.Status（added/modified/removed/renamed）
+// FileStatusBadge: a GitHub-style single-letter tile: A/M/D/R + a color block.
+// status comes from the backend's gh.File.Status (added/modified/removed/renamed).
 const statusMeta: Record<string, { letter: string; cls: string }> = {
   added: { letter: "A", cls: "bg-ok-bg text-ok" },
   modified: { letter: "M", cls: "bg-info/10 text-info" },
