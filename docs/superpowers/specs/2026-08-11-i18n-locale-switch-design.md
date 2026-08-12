@@ -118,6 +118,20 @@ const t = useT();
 
 无法识别的 locale 值（既非 `zh` 也非 `en`）一律落到 `LGTM_DEFAULT_LOCALE`，不报错。
 
+### API 错误文案：后端加稳定 code，前端查字典
+
+`internal/api/` 下约 15 处直接渲染给用户的中文错误串（`review.go:154` "PR 不存在或为私有仓库"、`commit.go:101` "无 push 权限（需 write/admin）"、`perms.go:77` 权限说明等）。前端 `lib/errors.ts` 的 `friendlyError()` 明确把后端已中文化的 403 / 404 原样透出，因此只翻前端字典的话，英语用户一触发错误就会看到中文。
+
+做法是**纯新增、不破坏现有契约**：
+
+- 错误响应增加一个稳定的 `code` 字段（如 `"pr_not_found"` / `"no_push_permission"` / `"not_logged_in"`）
+- `error` 字段保持原样不动，继续服务 curl 调试与非浏览器消费者
+- 前端优先按 `code` 从字典取文案；无 `code` 时回退到现有 `friendlyError`
+
+选它而不是「后端按 `Accept-Language` 自己翻」，是因为这样所有 UI 文案仍集中在前端字典一处，并自动享受 `en: Dict = typeof zh` 的编译期漏翻检查；Go 那边没有等价的静态保护。
+
+`internal/api/webhook.go` 回贴到 GitHub PR 的文案不走 `code` 路径——那是发给 GitHub 而非本站 UI 的，按 `LGTM_DEFAULT_LOCALE` 取值。
+
 ### 回流到前端
 
 `review.Result` 带上 `locale` 字段。review 页与 history 列表在 `result.locale !== 当前 UI locale` 时显示一行克制的提示（例如 "This review was generated in Chinese."），兑现「历史评审保持原样」的决策。
@@ -149,7 +163,7 @@ const t = useT();
 | --- | --- | --- |
 | 1 | 前端 i18n 地基 + 外壳：`lib/i18n/*`、Provider、cookie SSR 协商、`LocaleToggle`、NavBar / Footer / landing / history 文案 | 切到 EN 后首页全英文 |
 | 2 | review 工作区文案：review 页及全部子组件，加 `lib/errors.ts` / `notifications.ts` / `sse.ts` 中的用户可见串 | 切到 EN 后评审页界面全英文 |
-| 3 | 后端 locale 链路：prompts 分语言、System 串、schema `locale` 列 + 唯一键重建、`Store.Get` 签名、API 三级回退 | 带 `locale=en` 请求可拿到英文评审，且不与中文缓存冲突 |
+| 3 | 后端 locale 链路：prompts 分语言、System 串、schema `locale` 列 + 唯一键重建、`Store.Get` 签名、API 三级回退、错误响应加 `code` | 带 `locale=en` 请求可拿到英文评审，且不与中文缓存冲突 |
 | 4 | 端到端接通：前端提交带 locale、`Result.locale` 回流、跨语言提示条 | 英语用户提交 PR 拿到英文评审；看旧中文评审有提示 |
 
 PR 3 与 PR 4 是 stack 关系（4 依赖 3 的 API）。**若 PR 4 的 base 指向 PR 3 的分支，合并前必须先 retarget 到 main**，否则提交会被孤立。
