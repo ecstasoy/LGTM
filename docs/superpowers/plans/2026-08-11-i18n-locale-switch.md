@@ -1683,7 +1683,28 @@ func resolveLocale(c *gin.Context, bodyLocale string, def i18n.Locale) i18n.Loca
 
 `webhook.go` 无用户请求，直接用 `i18n.Normalize(cfg.DefaultLocale, i18n.ZH)`。
 
-- [ ] **Step 5: 加错误 code**
+- [ ] **Step 5: 把 agent 完成消息改成结构化帧（计划修订，Task 10 评审发现）**
+
+`internal/api/steer.go:253` 现在发的是格式化中文散文：
+
+```go
+fmt.Sprintf("Agent 完成（%d 步）：%s", result.Steps, result.Output)
+```
+
+而前端 `app/review/[id]/page.tsx:554` 用正则 `/^Agent 完成（\d+ 步）：(.*)$/s` 去**解析这段中文**取出正文。一旦本任务把这条消息翻成英文，正则永久失配：`InfoBanner` 落进 `!m` 分支，"Agent reply" 标题消失，agent 回复里的 Markdown（代码块、列表）退化成纯文本原样显示。不崩溃，但静默降级，且类型检查和测试都抓不到。
+
+不要把正则改成同时匹配中英文——那是把耦合又加固一层。改成结构化帧，一次性拆掉耦合：
+
+```go
+writeSSE(c.Writer, "agent_reply", map[string]any{
+    "steps":  result.Steps,
+    "output": result.Output,
+})
+```
+
+前端据此渲染，标题从自己的字典取（`t.review.agentReplyLabel` 已存在），`output` 直接喂给 ReactMarkdown。**前端那一半在 Task 21 做**——本任务只改后端并保留旧的 `info` 帧一并发送，这样 PR 3 单独合并时前端仍然工作；Task 21 接上新帧后再由它删掉旧帧。
+
+- [ ] **Step 6: 加错误 code**
 
 创建 `backend/internal/api/errcode.go`：
 
@@ -1723,16 +1744,16 @@ const (
 
 `perms.go` 的 `Reason` 字段同理加一个并列的 `ReasonCode` 字段，取值用同一批常量。
 
-- [ ] **Step 6: 跑测试确认通过**
+- [ ] **Step 7: 跑测试确认通过**
 
 Run: `cd backend && go build ./... && go test ./...`
 Expected: PASS
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 8: 提交**
 
 ```bash
 git add backend/internal/api
-git commit -m "feat(i18n): negotiate request locale and tag error responses with stable codes"
+git commit -m "feat(i18n): negotiate request locale and emit a structured agent-reply frame"
 ```
 
 ---
@@ -1802,8 +1823,10 @@ PR 标题：`feat(i18n): generate reviews in the requested locale`
 - Modify: `frontend/lib/i18n/dictionaries/en.ts`
 
 **Interfaces:**
-- Consumes: `useLocale`（Task 3）、`friendlyError(raw, t)`（Task 13）、后端 `code` 常量（Task 19）
+- Consumes: `useLocale`（Task 3）、`friendlyError(raw, t)`（Task 13）、后端 `code` 常量与 `agent_reply` 帧（Task 19）
 - Produces: `friendlyError(raw: string, t: Dict, code?: string): string`（新增可选第三参数）；字典新增 `errors.byCode: Record<string, string>`
+
+**另需完成（计划修订，Task 10 评审发现）：** 消费 Task 19 新增的 `agent_reply` 结构化 SSE 帧，删掉 `app/review/[id]/page.tsx:554` 那个解析中文散文的正则 `/^Agent 完成（\d+ 步）：(.*)$/s`，并让 Task 19 里为兼容而保留的旧 `info` 帧一并下线。标题用已有的 `t.review.agentReplyLabel`，`output` 直接交给 ReactMarkdown。做完后前端不再依赖任何后端产出的自然语言文本的形状。
 
 - [ ] **Step 1: 字典加 code 映射**
 
