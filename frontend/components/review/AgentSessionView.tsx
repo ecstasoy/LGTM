@@ -150,6 +150,10 @@ export function AgentSessionView({
   toolEvents,
 }: Props) {
   const t = useT();
+  // Mutated on every render, read only when streamSteer's async path actually throws — so an
+  // in-flight steer request picks up a locale change without needing to be restarted.
+  const tRef = useRef(t);
+  tRef.current = t;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 5 步状态从 SSE 派生：
@@ -228,7 +232,7 @@ export function AgentSessionView({
             },
             onStageError: (_s, msg) => markError(msg),
           },
-          t,
+          tRef,
           undefined,
           mode,
         );
@@ -257,7 +261,8 @@ export function AgentSessionView({
       onSteerInfo,
       onSteerToolCallDone,
       onSteerToolCallStart,
-      t,
+      // tRef intentionally omitted: refs have a stable identity across renders (like a state
+      // setter), so it doesn't need to be listed for this callback to stay up to date.
     ],
   );
 

@@ -55,6 +55,10 @@ export function AgentPanel({ onClose, reviewId }: Props) {
   // so it re-localizes immediately if the user toggles the language while the panel stays open.
   // Persisting it into state would freeze it in whatever locale was active at mount.
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  // Mutated on every render, read only when streamSteer's async path actually throws — so an
+  // in-flight steer request picks up a locale change without needing to be restarted.
+  const tRef = useRef(t);
+  tRef.current = t;
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const inFlightRef = useRef(false);
@@ -145,7 +149,7 @@ export function AgentPanel({ onClose, reviewId }: Props) {
             setMsgs((m) => [...m, { role: "assistant", text: `❌ ${msg}` }]);
           },
         },
-        t,
+        tRef,
         controller.signal,
         "agent",
       );

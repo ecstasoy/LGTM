@@ -53,6 +53,10 @@ export default function ReviewDetailPage({ params }: PageProps) {
 
 function ReviewDetailPageContent({ id }: { id: string }) {
   const t = useT();
+  // Mutated on every render, read only when streamReview's async path actually throws — see the
+  // comment on the data-fetching effect below for why t itself can't be a dependency there.
+  const tRef = useRef(t);
+  tRef.current = t;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -160,7 +164,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           setSummaryDone(true);
         },
         onDone: () => !cancelled && (setSummaryDone(true), setStreaming(false)),
-      }, t, controller.signal, sourceModel, hasStageModels ? sourceStageModels : undefined)
+      }, tRef, controller.signal, sourceModel, hasStageModels ? sourceStageModels : undefined)
         .catch((e) => {
           if (e instanceof DOMException && e.name === "AbortError") return;
           if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -201,6 +205,10 @@ function ReviewDetailPageContent({ id }: { id: string }) {
       cancelled = true;
       controller?.abort();
     };
+    // t/tRef is deliberately excluded here: restarting an in-flight SSE stream on every locale
+    // toggle would throw away real streaming progress. streamReview reads the dictionary through
+    // tRef.current at throw-time instead, so it still picks up a locale change without needing
+    // this effect to rerun.
   }, [id, isStreaming, sourceURL, sourceModel, stageModelDep, retryNonce]);
 
   // 重试：清掉错误与上一轮部分结果，bump retryNonce 触发取数 effect 重跑

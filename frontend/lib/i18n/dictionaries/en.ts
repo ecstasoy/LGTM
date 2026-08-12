@@ -293,7 +293,7 @@ export const en: Dict = {
   errors: {
     generic: "The review failed. Please try again.",
     sseTimeout:
-      "The review timed out waiting for a response — the PR may be large or the server busy. Please try again.",
+      "The review timed out waiting for a response — the PR may be large, or the server may be busy. Please try again.",
     network: "Network connection failed. Check your connection and try again.",
     invalidPrUrl:
       "That doesn't look like a valid PR link. Use a URL like https://github.com/owner/repo/pull/123.",

@@ -11,6 +11,16 @@ import type {
 // Re-exported so existing consumers can keep importing it from here; new code should import from ./types directly.
 export type { PrMeta } from "./types";
 
+// Shaped like a React ref (deliberately not importing React's RefObject type here — this file has
+// no other React dependency). The caller passes a ref whose .current it keeps updated on every
+// render; streamReview/streamSteer dereference it only at the moment they actually need to throw,
+// not when the call is first made, so a locale switch mid-request can't leave a stale dictionary
+// captured in the closure. Same technique as lib/perms.ts's tRef, just supplied by the caller
+// instead of created internally, since these are plain async functions, not hooks.
+export interface DictRef {
+  readonly current: Dict;
+}
+
 export interface StreamCallbacks {
   onPr?: (pr: PrMeta) => void;
   onFiles?: (files: File[]) => void;
@@ -63,7 +73,7 @@ export async function streamSteer(
   text: string,
   stage: "risks" | "suggestions",
   cb: StreamCallbacks,
-  t: Dict,
+  t: DictRef,
   signal?: AbortSignal,
   mode: SteerMode = "stage",
 ): Promise<void> {
@@ -79,7 +89,7 @@ export async function streamSteer(
     throw new Error(msg);
   }
   if (!res.body) {
-    throw new Error(t.errors.emptyResponseBody);
+    throw new Error(t.current.errors.emptyResponseBody);
   }
   await consume(res.body, cb);
 }
@@ -89,7 +99,7 @@ export async function streamSteer(
 export async function streamReview(
   url: string,
   cb: StreamCallbacks,
-  t: Dict,
+  t: DictRef,
   signal?: AbortSignal,
   model?: string,
   stageModels?: Record<string, string>,
@@ -109,7 +119,7 @@ export async function streamReview(
     throw new Error(msg);
   }
   if (!res.body) {
-    throw new Error(t.errors.emptyResponseBody);
+    throw new Error(t.current.errors.emptyResponseBody);
   }
   await consume(res.body, cb);
 }
