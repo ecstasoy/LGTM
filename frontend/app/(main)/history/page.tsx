@@ -11,14 +11,18 @@ import { useMe } from "@/lib/auth";
 import { deleteReview } from "@/lib/reviews";
 import { CIStatus, type CIStatusValue } from "@/components/ui/ci-status";
 import { RiskPips } from "@/components/landing/RiskPips";
+import { useT } from "@/lib/i18n/context";
+import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 const ZERO_COUNTS = { high: 0, medium: 0, low: 0 } as const;
 
-// HistoryPage 历史评审密集表格。
-// 6 列 grid 严格对齐 design 原型 History.jsx：CI / 仓库PR / 标题 / 风险 / SHA / 时间。
-// 工具行：搜索框（按 repo+title 子串）+ 语言筛选段控（从当前条目的 lang 字段动态聚合）。
-// 单条点击 → /review/[id]，命中缓存秒回。
+// HistoryPage: dense history table.
+// 6-column grid mirrors the design prototype History.jsx: CI / repo+PR / title / risk / SHA / time.
+// Toolbar: search box (matches repo+title substring) + language filter segmented control
+// (aggregated dynamically from the current items' lang field).
+// Clicking a row navigates to /review/[id], hitting cache for an instant load.
 export default function HistoryPage() {
+  const t = useT();
   const [items, setItems] = useState<ReviewSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -29,7 +33,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     let cancelled = false;
-    // 拉到 maxListLimit=100，本地筛选；列表场景体积可控
+    // Fetch up to maxListLimit=100 and filter locally; list size stays manageable at this scale.
     listReviews(100)
       .then((d) => {
         if (!cancelled) setItems(d);
@@ -43,16 +47,16 @@ export default function HistoryPage() {
   }, [nonce]);
 
   async function handleDelete(id: string, label: string) {
-    if (!window.confirm(`确定删除评审「${label}」？操作不可撤销。`)) return;
+    if (!window.confirm(t.history.confirmDelete(label))) return;
     try {
       await deleteReview(id);
       setNonce((n) => n + 1);
     } catch (e) {
-      window.alert("删除失败：" + (e instanceof Error ? e.message : String(e)));
+      window.alert(t.history.deleteFailed(e instanceof Error ? e.message : String(e)));
     }
   }
 
-  // langs 段控值 = ["all", ...当前结果集所有非空 lang 去重]
+  // langs segmented-control values = ["all", ...every distinct non-empty lang in the current result set]
   const langs = useMemo<string[]>(() => {
     if (!items) return ["all"];
     const set = new Set<string>();
@@ -77,9 +81,9 @@ export default function HistoryPage() {
     <section className="space-y-5">
       <header className="flex items-center gap-3">
         <HistoryIcon className="h-5 w-5 text-muted" />
-        <h1 className="m-0 text-[22px] font-semibold tracking-[-0.01em]">评审历史</h1>
+        <h1 className="m-0 text-[22px] font-semibold tracking-[-0.01em]">{t.history.title}</h1>
         <span className="font-mono text-xs text-faint">
-          {items?.length ?? 0} 条 · SHA 级缓存，秒回
+          {t.history.countLabel(items?.length ?? 0)}
         </span>
       </header>
 
@@ -89,7 +93,7 @@ export default function HistoryPage() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索仓库或标题…"
+            placeholder={t.history.searchPlaceholder}
             className="min-w-0 flex-1 border-none bg-transparent text-sm text-text outline-none placeholder:text-muted"
           />
         </div>
@@ -116,8 +120,8 @@ export default function HistoryPage() {
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
-        <HeaderRow />
-        <TableBody rows={rows} items={items} error={error} myLogin={myLogin} onDelete={handleDelete} />
+        <HeaderRow t={t} />
+        <TableBody rows={rows} items={items} error={error} myLogin={myLogin} onDelete={handleDelete} t={t} />
       </div>
     </section>
   );
@@ -125,7 +129,7 @@ export default function HistoryPage() {
 
 const GRID_COLS = "grid-cols-[28px_160px_1fr_130px_90px_70px]";
 
-function HeaderRow() {
+function HeaderRow({ t }: { t: Dict }) {
   return (
     <div
       className={cn(
@@ -135,11 +139,11 @@ function HeaderRow() {
       )}
     >
       <span>CI</span>
-      <span>仓库 / PR</span>
-      <span>标题</span>
-      <span>风险</span>
+      <span>{t.history.colRepo}</span>
+      <span>{t.history.colTitle}</span>
+      <span>{t.history.colRisk}</span>
       <span>SHA</span>
-      <span className="text-right">时间</span>
+      <span className="text-right">{t.history.colTime}</span>
     </div>
   );
 }
@@ -150,28 +154,30 @@ function TableBody({
   error,
   myLogin,
   onDelete,
+  t,
 }: {
   rows: ReviewSummary[];
   items: ReviewSummary[] | null;
   error: string | null;
   myLogin?: string;
   onDelete: (id: string, label: string) => void;
+  t: Dict;
 }) {
   if (error) {
-    return <p className="px-4 py-6 text-center text-sm text-fail">加载失败：{error}</p>;
+    return <p className="px-4 py-6 text-center text-sm text-fail">{t.history.loadFailed(error)}</p>;
   }
   if (items === null) {
-    return <p className="px-4 py-6 text-center text-sm text-muted">加载中…</p>;
+    return <p className="px-4 py-6 text-center text-sm text-muted">{t.history.loading}</p>;
   }
   if (items.length === 0) {
     return (
       <p className="px-4 py-8 text-center text-sm text-muted">
-        还没有评审记录。回到落地页提交一个 PR 链接试试。
+        {t.history.empty}
       </p>
     );
   }
   if (rows.length === 0) {
-    return <p className="px-4 py-8 text-center text-sm text-muted">无匹配结果</p>;
+    return <p className="px-4 py-8 text-center text-sm text-muted">{t.history.noMatches}</p>;
   }
   return (
     <>
@@ -182,6 +188,7 @@ function TableBody({
           isFirst={i === 0}
           myLogin={myLogin}
           onDelete={onDelete}
+          t={t}
         />
       ))}
     </>
@@ -193,13 +200,15 @@ function Row({
   isFirst,
   myLogin,
   onDelete,
+  t,
 }: {
   review: ReviewSummary;
   isFirst: boolean;
   myLogin?: string;
   onDelete: (id: string, label: string) => void;
+  t: Dict;
 }) {
-  // 删除按钮可见性：已登录 + （我是 owner OR 匿名遗留）
+  // Delete button visibility: signed in + (I'm the owner OR it's a legacy anonymous record).
   const canDelete = !!myLogin && (!review.created_by || review.created_by === myLogin);
   return (
     <div
@@ -220,10 +229,10 @@ function Row({
           {review.owner}/{review.repo}
           <span className="text-faint">#{review.pr}</span>
         </code>
-        <span className="truncate text-sm">{review.title || "(未命名)"}</span>
+        <span className="truncate text-sm">{review.title || t.history.untitled}</span>
         <RiskPips counts={review.risk_counts ?? ZERO_COUNTS} />
         <code className="font-mono text-xs text-faint">{review.head_sha.slice(0, 7)}</code>
-        <span className="text-right text-xs text-faint">{formatRelative(review.created_at)}</span>
+        <span className="text-right text-xs text-faint">{formatRelative(review.created_at, t)}</span>
       </Link>
       {canDelete ? (
         <button
@@ -233,9 +242,9 @@ function Row({
             e.stopPropagation();
             onDelete(review.id, `${review.owner}/${review.repo}#${review.pr}`);
           }}
-          title={review.created_by ? "删除你创建的评审" : "删除匿名遗留记录"}
+          title={review.created_by ? t.history.deleteOwnTitle : t.history.deleteAnonymousTitle}
           className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-high-bg hover:text-high group-hover:opacity-100"
-          aria-label="删除评审"
+          aria-label={t.history.deleteAriaLabel}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
@@ -244,14 +253,14 @@ function Row({
   );
 }
 
-// formatRelative: 刚刚 / N 分钟前 / N 小时前 / N 天前 / MM-DD
-function formatRelative(iso: string): string {
+// formatRelative: just now / N minutes ago / N hours ago / N days ago / MM-DD
+function formatRelative(iso: string, t: Dict): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const delta = (Date.now() - d.getTime()) / 1000;
-  if (delta < 60) return "刚刚";
-  if (delta < 3600) return `${Math.floor(delta / 60)} 分钟前`;
-  if (delta < 86400) return `${Math.floor(delta / 3600)} 小时前`;
-  if (delta < 7 * 86400) return `${Math.floor(delta / 86400)} 天前`;
-  return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  if (delta < 60) return t.history.justNow;
+  if (delta < 3600) return t.history.minutesAgo(Math.floor(delta / 60));
+  if (delta < 86400) return t.history.hoursAgo(Math.floor(delta / 3600));
+  if (delta < 7 * 86400) return t.history.daysAgo(Math.floor(delta / 86400));
+  return d.toLocaleDateString(t.history.dateLocale, { month: "2-digit", day: "2-digit" });
 }
