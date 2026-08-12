@@ -7,6 +7,8 @@ import { Check, Plus } from "lucide-react";
 import { listReviews } from "@/lib/api";
 import type { ReviewSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/context";
+import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 interface Props {
   activeId?: string; // 当前评审 ULID；streaming 模式传 undefined
@@ -16,13 +18,14 @@ interface Props {
 // 拉最近评审 20 条，按 created_at 切分「今天 / 更早」两组；当前评审高亮 + 左侧 accent 竖条。
 // 严格对齐 design 原型 SessionList，但用 Tailwind 替代原型的内联样式。
 export function SessionList({ activeId }: Props) {
+  const t = useT();
   const [items, setItems] = useState<ReviewSummary[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     listReviews(20)
       .then((d) => !cancelled && setItems(d))
-      .catch(() => !cancelled && setItems([])); // 静默失败：侧栏空 + 仍可用「新建评审」
+      .catch(() => !cancelled && setItems([])); // Silent failure: sidebar stays empty, "New review" still works
     return () => {
       cancelled = true;
     };
@@ -38,26 +41,24 @@ export function SessionList({ activeId }: Props) {
           className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-accent text-sm font-medium text-accent-fg hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
-          新建评审
+          {t.agent.newReviewLink}
         </Link>
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-3 pt-1">
         {items === null ? (
-          <p className="px-2 py-4 text-xs text-faint">加载中…</p>
+          <p className="px-2 py-4 text-xs text-faint">{t.review.loading}</p>
         ) : items.length === 0 ? (
-          <p className="px-2 py-4 text-xs text-muted">
-            还没有历史。粘 PR URL 开始第一次评审。
-          </p>
+          <p className="px-2 py-4 text-xs text-muted">{t.agent.sessionListEmptyNote}</p>
         ) : (
           groups
             .filter((g) => g.items.length > 0)
             .map((g) => (
-              <div key={g.label} className="mt-2">
+              <div key={g.key} className="mt-2">
                 <div className="px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-faint">
-                  {g.label}
+                  {g.key === "today" ? t.agent.bucketLabelToday : t.agent.bucketLabelEarlier}
                 </div>
                 {g.items.map((h) => (
-                  <SessionRow key={h.id} item={h} active={h.id === activeId} />
+                  <SessionRow key={h.id} item={h} active={h.id === activeId} t={t} />
                 ))}
               </div>
             ))
@@ -67,7 +68,7 @@ export function SessionList({ activeId }: Props) {
   );
 }
 
-function SessionRow({ item, active }: { item: ReviewSummary; active: boolean }) {
+function SessionRow({ item, active, t }: { item: ReviewSummary; active: boolean; t: Dict }) {
   return (
     <Link
       href={`/review/${item.id}?view=session`}
@@ -88,10 +89,11 @@ function SessionRow({ item, active }: { item: ReviewSummary; active: boolean }) 
           <span className="text-faint">#{item.pr}</span>
         </code>
         <div className="mt-px truncate text-xs text-muted">
-          {item.title || "(未命名)"}
+          {item.title || t.recentReviews.untitled}
         </div>
         <div className="mt-[3px] font-mono text-[10px] text-faint">
-          已完成 · {formatWhen(item.created_at)}
+          {t.agent.completedAtPrefix}
+          {formatWhen(item.created_at, t)}
         </div>
       </span>
     </Link>
@@ -99,11 +101,11 @@ function SessionRow({ item, active }: { item: ReviewSummary; active: boolean }) 
 }
 
 interface Bucket {
-  label: "今天" | "更早";
+  key: "today" | "earlier";
   items: ReviewSummary[];
 }
 
-// bucketByWhen 按 created_at 切「今天 / 更早」；今天 = 同 calendar day（本地时区）
+// bucketByWhen splits by created_at into "today" / "earlier" buckets; today = same calendar day (local tz)
 function bucketByWhen(items: ReviewSummary[]): Bucket[] {
   const today: ReviewSummary[] = [];
   const earlier: ReviewSummary[] = [];
@@ -118,18 +120,18 @@ function bucketByWhen(items: ReviewSummary[]): Bucket[] {
     }
   }
   return [
-    { label: "今天", items: today },
-    { label: "更早", items: earlier },
+    { key: "today", items: today },
+    { key: "earlier", items: earlier },
   ];
 }
 
-function formatWhen(iso: string): string {
+function formatWhen(iso: string, t: Dict): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const delta = (Date.now() - d.getTime()) / 1000;
-  if (delta < 60) return "刚刚";
-  if (delta < 3600) return `${Math.floor(delta / 60)} 分钟前`;
-  if (delta < 86400) return `${Math.floor(delta / 3600)} 小时前`;
-  if (delta < 7 * 86400) return `${Math.floor(delta / 86400)} 天前`;
-  return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  if (delta < 60) return t.recentReviews.justNow;
+  if (delta < 3600) return t.recentReviews.minutesAgo(Math.floor(delta / 60));
+  if (delta < 86400) return t.recentReviews.hoursAgo(Math.floor(delta / 3600));
+  if (delta < 7 * 86400) return t.recentReviews.daysAgo(Math.floor(delta / 86400));
+  return d.toLocaleDateString(t.recentReviews.dateLocale, { month: "2-digit", day: "2-digit" });
 }

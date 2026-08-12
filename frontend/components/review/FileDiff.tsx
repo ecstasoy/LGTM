@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { parsePatch, type DiffLine as DiffLineModel } from "@/lib/parsePatch";
 import { highlightHTML, langFromPath } from "@/lib/highlight";
 import { FileStatusBadge } from "@/components/ui/file-status-badge";
+import { useT } from "@/lib/i18n/context";
 import { InlineSuggestion } from "./InlineSuggestion";
 
 interface Props {
@@ -23,6 +24,7 @@ interface Props {
 // sticky 文件头（chevron + status + 路径 + adds/dels + 右侧 N 风险）+ hunks（@@ 缩进对齐代码列）
 // + 4 列 grid 代码行 + 命中风险的左侧 3px severity 色条 + 锚定行内建议气泡
 export function FileDiff({ file, riskByLine, suggestionsByLine, expanded, expandedNonce }: Props) {
+  const t = useT();
   const [collapsed, setCollapsed] = useState(false);
   const hunks = parsePatch(file.patch);
   const riskCount = riskByLine?.size ?? 0;
@@ -68,7 +70,7 @@ export function FileDiff({ file, riskByLine, suggestionsByLine, expanded, expand
         {riskCount > 0 ? (
           <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap text-xs text-muted">
             <AlertTriangle className="h-3 w-3 text-high" />
-            {riskCount} 风险
+            {t.diff.riskCountLabel(riskCount)}
           </span>
         ) : null}
       </header>
@@ -76,7 +78,7 @@ export function FileDiff({ file, riskByLine, suggestionsByLine, expanded, expand
       {!collapsed
         ? hunks.length === 0
           ? (
-            <p className="px-3 py-3 text-xs text-muted">（无可显示的 patch）</p>
+            <p className="px-3 py-3 text-xs text-muted">{t.diff.noPatchNote}</p>
           ) : (
             hunks.map((h, i) => (
               <div key={i}>
@@ -124,6 +126,7 @@ function DiffRow({
   anchorId?: string;
   lang: string;
 }) {
+  const t = useT();
   const isAdd = line.type === "add";
   const isDel = line.type === "del";
   const rowBg = isAdd ? "bg-add-bg" : isDel ? "bg-del-bg" : "";
@@ -141,7 +144,7 @@ function DiffRow({
     >
       {sevHit ? (
         <span
-          title="风险点"
+          title={t.diff.riskMarkerTitle}
           className={cn("absolute inset-y-0 left-0 w-[3px]", sevBar[sevHit])}
         />
       ) : null}
