@@ -51,12 +51,10 @@ interface Msg {
 // SSE tool_call_start/done → 在 chat 内插 tool message；info（"Agent 完成..."）→ assistant message。
 export function AgentPanel({ onClose, reviewId }: Props) {
   const t = useT();
-  const [msgs, setMsgs] = useState<Msg[]>([
-    {
-      role: "assistant",
-      text: t.agent.introMessage,
-    },
-  ]);
+  // The greeting is NOT seeded into msgs: it's rendered straight from t.agent.introMessage below,
+  // so it re-localizes immediately if the user toggles the language while the panel stays open.
+  // Persisting it into state would freeze it in whatever locale was active at mount.
+  const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const inFlightRef = useRef(false);
@@ -191,6 +189,7 @@ export function AgentPanel({ onClose, reviewId }: Props) {
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3.5 py-1.5">
+        <AgentMessage msg={{ role: "assistant", text: t.agent.introMessage }} />
         {msgs.map((m, i) =>
           m.role === "tool" ? (
             <ToolMessage key={i} msg={m} t={t} />

@@ -253,7 +253,7 @@ export const en: Dict = {
     runningLabel: "Running",
     failedLabel: "Failed",
     doneLabel: "Done",
-    toolExecutingLabel: "Running…",
+    toolExecutingLabel: "Executing…",
     quotedText: (text: string) => `"${text}"`,
     steerFailedPrefix: (error: string) => `Steering failed: ${error}`,
     // See the matching comment in zh.ts: the space must live in the string itself.
