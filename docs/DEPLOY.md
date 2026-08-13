@@ -64,8 +64,14 @@ curl https://lgtm-backend.fly.dev/api/health/ready
 
 ```toml
 [env]
-  DEFAULT_LOCALE = "zh"
+  DEFAULT_LOCALE = "en"
 ```
+
+本仓的 `backend/fly.toml` 设成了 `en`，因为 bot 贴到 GitHub 的**外壳文案是写死英文的**（标题、页脚、
+建议数、slash 命令回复、内联建议前缀）。若这里配成 `zh`，bot 会变成英文外壳套中文正文的混排。
+
+规则：**发到 GitHub 的一律英文；LGTM 网页界面里的跟用户 locale 走。** GitHub 评论的读者是 PR 参与者，
+不是 LGTM 用户。网页端不受这个环境变量影响——前端每次请求都显式带 `locale` 字段，够不到第三级。
 
 前端不需要对应的环境变量：它按 cookie `lgtm-locale` 取，首次访问时由服务端读 `Accept-Language` 协商。
 

@@ -172,19 +172,24 @@ func DeleteAdoptComment(d Deps) gin.HandlerFunc {
 // buildSuggestionCommentBody renders one Suggestion as GitHub PR review comment markdown
 // The key part: the ```suggestion block holds only patch.after, and GitHub works out the diff against the original and offers one-click Apply
 // With no patch it degrades to a plain text suggestion (still useful, the PR author just edits by hand)
+//
+// This is shared by three call sites (webhook.go's bot review, and this file's and commit.go's adopt endpoints,
+// which back the web UI's Comment/Commit buttons), so it is hardcoded English everywhere: anything posted to
+// GitHub is English, regardless of DEFAULT_LOCALE; only the LGTM web UI itself follows the user's locale.
+// GitHub comments are read by PR participants, not by LGTM users.
 func buildSuggestionCommentBody(s review.Suggestion) string {
 	var sb strings.Builder
 	sb.WriteString("**")
 	sb.WriteString(s.Title)
-	sb.WriteString("** ·  AI 建议（")
+	sb.WriteString("** ·  AI suggestion (")
 	sb.WriteString(s.Type)
-	sb.WriteString("）\n\n")
+	sb.WriteString(")\n\n")
 	sb.WriteString(s.Body)
 	if s.Patch != nil && s.Patch.After != "" {
 		sb.WriteString("\n\n```suggestion\n")
 		sb.WriteString(s.Patch.After)
 		sb.WriteString("\n```")
 	}
-	sb.WriteString("\n\n<sub>— [LGTM](https://lgtm-alpha.vercel.app) 自动生成</sub>")
+	sb.WriteString("\n\n<sub>— generated automatically by [LGTM](https://lgtm-alpha.vercel.app)</sub>")
 	return sb.String()
 }
