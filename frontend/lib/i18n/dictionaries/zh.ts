@@ -56,15 +56,11 @@ export const zh = {
     risks: "风险",
     suggestions: "建议",
   },
-  recentReviews: {
-    title: "最近评审",
-    viewAll: "查看全部",
+  // Copy shared by every review list (landing recent list, history table); keep list-specific wording out.
+  reviewList: {
     loading: "加载中…",
     loadFailed: (error: string) => `加载失败：${error}`,
-    empty: "还没有评审记录。提交一个 PR 链接试试。",
     untitled: "(未命名)",
-    webhookBadge: "⚡ 自动",
-    webhookTitle: "GitHub 推 PR webhook 自动触发",
     deleteOwnTitle: "删除你创建的评审",
     deleteAnonymousTitle: "删除匿名遗留记录",
     deleteAriaLabel: "删除评审",
@@ -76,6 +72,13 @@ export const zh = {
     daysAgo: (n: number) => `${n} 天前`,
     // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "zh-CN",
+  },
+  recentReviews: {
+    title: "最近评审",
+    viewAll: "查看全部",
+    empty: "还没有评审记录。提交一个 PR 链接试试。",
+    webhookBadge: "⚡ 自动",
+    webhookTitle: "GitHub 推 PR webhook 自动触发",
   },
   home: {
     introPrefix:
@@ -90,22 +93,8 @@ export const zh = {
     colTitle: "标题",
     colRisk: "风险",
     colTime: "时间",
-    loading: "加载中…",
-    loadFailed: (error: string) => `加载失败：${error}`,
     empty: "还没有评审记录。回到落地页提交一个 PR 链接试试。",
     noMatches: "无匹配结果",
-    untitled: "(未命名)",
-    deleteOwnTitle: "删除你创建的评审",
-    deleteAnonymousTitle: "删除匿名遗留记录",
-    deleteAriaLabel: "删除评审",
-    confirmDelete: (label: string) => `确定删除评审「${label}」？操作不可撤销。`,
-    deleteFailed: (msg: string) => `删除失败：${msg}`,
-    justNow: "刚刚",
-    minutesAgo: (n: number) => `${n} 分钟前`,
-    hoursAgo: (n: number) => `${n} 小时前`,
-    daysAgo: (n: number) => `${n} 天前`,
-    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
-    dateLocale: "zh-CN",
   },
   userMenu: {
     signIn: "GitHub 登录",

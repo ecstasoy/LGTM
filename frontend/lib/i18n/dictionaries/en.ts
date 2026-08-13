@@ -60,15 +60,10 @@ export const en: Dict = {
     risks: "Risks",
     suggestions: "Suggestions",
   },
-  recentReviews: {
-    title: "Recent reviews",
-    viewAll: "View all",
+  reviewList: {
     loading: "Loading…",
     loadFailed: (error: string) => `Failed to load: ${error}`,
-    empty: "No reviews yet. Submit a PR link to get started.",
     untitled: "(Untitled)",
-    webhookBadge: "⚡ Auto",
-    webhookTitle: "Triggered automatically by a GitHub PR webhook",
     deleteOwnTitle: "Delete the review you created",
     deleteAnonymousTitle: "Delete legacy anonymous record",
     deleteAriaLabel: "Delete review",
@@ -80,6 +75,13 @@ export const en: Dict = {
     daysAgo: (n: number) => `${n}d ago`,
     // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "en-US",
+  },
+  recentReviews: {
+    title: "Recent reviews",
+    viewAll: "View all",
+    empty: "No reviews yet. Submit a PR link to get started.",
+    webhookBadge: "⚡ Auto",
+    webhookTitle: "Triggered automatically by a GitHub PR webhook",
   },
   home: {
     introPrefix:
@@ -95,22 +97,8 @@ export const en: Dict = {
     colTitle: "Title",
     colRisk: "Risk",
     colTime: "Time",
-    loading: "Loading…",
-    loadFailed: (error: string) => `Failed to load: ${error}`,
     empty: "No reviews yet. Head back to the landing page and submit a PR link.",
     noMatches: "No matching results",
-    untitled: "(Untitled)",
-    deleteOwnTitle: "Delete the review you created",
-    deleteAnonymousTitle: "Delete legacy anonymous record",
-    deleteAriaLabel: "Delete review",
-    confirmDelete: (label: string) => `Delete review "${label}"? This can't be undone.`,
-    deleteFailed: (msg: string) => `Delete failed: ${msg}`,
-    justNow: "just now",
-    minutesAgo: (n: number) => `${n}m ago`,
-    hoursAgo: (n: number) => `${n}h ago`,
-    daysAgo: (n: number) => `${n}d ago`,
-    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
-    dateLocale: "en-US",
   },
   userMenu: {
     signIn: "Sign in with GitHub",

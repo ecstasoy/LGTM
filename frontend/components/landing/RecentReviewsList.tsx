@@ -57,13 +57,13 @@ export function RecentReviewsList() {
   }, [nonce]);
 
   async function handleDelete(id: string, label: string) {
-    if (!window.confirm(t.recentReviews.confirmDelete(label))) return;
+    if (!window.confirm(t.reviewList.confirmDelete(label))) return;
     try {
       await deleteReview(id);
       setNonce((n) => n + 1);
     } catch (e) {
       window.alert(
-        t.recentReviews.deleteFailed(
+        t.reviewList.deleteFailed(
           friendlyError(
             e instanceof Error ? e.message : String(e),
             t,
@@ -110,10 +110,10 @@ function ListBody({
   t: Dict;
 }) {
   if (error) {
-    return <EmptyText>{t.recentReviews.loadFailed(error)}</EmptyText>;
+    return <EmptyText>{t.reviewList.loadFailed(error)}</EmptyText>;
   }
   if (items === null) {
-    return <EmptyText>{t.recentReviews.loading}</EmptyText>;
+    return <EmptyText>{t.reviewList.loading}</EmptyText>;
   }
   if (items.length === 0) {
     return <EmptyText>{t.recentReviews.empty}</EmptyText>;
@@ -170,7 +170,7 @@ function RecentRow({
         </code>
         {/* title flex-1 + min-w-0 才能让 truncate 真的截（flex 子项默认 min-width: auto 防截断）*/}
         <span className="min-w-0 flex-1 truncate text-sm text-text" title={item.title}>
-          {item.title || t.recentReviews.untitled}
+          {item.title || t.reviewList.untitled}
         </span>
         {item.source === "webhook" ? (
           <span
@@ -193,9 +193,9 @@ function RecentRow({
             e.stopPropagation();
             onDelete(item.id, `${item.owner}/${item.repo}#${item.pr}`);
           }}
-          title={item.created_by ? t.recentReviews.deleteOwnTitle : t.recentReviews.deleteAnonymousTitle}
+          title={item.created_by ? t.reviewList.deleteOwnTitle : t.reviewList.deleteAnonymousTitle}
           className="mr-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-high-bg hover:text-high group-hover:opacity-100"
-          aria-label={t.recentReviews.deleteAriaLabel}
+          aria-label={t.reviewList.deleteAriaLabel}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
@@ -214,9 +214,9 @@ function formatRelative(iso: string, t: Dict): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const delta = (Date.now() - d.getTime()) / 1000; // seconds
-  if (delta < 60) return t.recentReviews.justNow;
-  if (delta < 3600) return t.recentReviews.minutesAgo(Math.floor(delta / 60));
-  if (delta < 86400) return t.recentReviews.hoursAgo(Math.floor(delta / 3600));
-  if (delta < 7 * 86400) return t.recentReviews.daysAgo(Math.floor(delta / 86400));
-  return d.toLocaleDateString(t.recentReviews.dateLocale, { month: "2-digit", day: "2-digit" });
+  if (delta < 60) return t.reviewList.justNow;
+  if (delta < 3600) return t.reviewList.minutesAgo(Math.floor(delta / 60));
+  if (delta < 86400) return t.reviewList.hoursAgo(Math.floor(delta / 3600));
+  if (delta < 7 * 86400) return t.reviewList.daysAgo(Math.floor(delta / 86400));
+  return d.toLocaleDateString(t.reviewList.dateLocale, { month: "2-digit", day: "2-digit" });
 }

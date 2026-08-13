@@ -89,7 +89,7 @@ function SessionRow({ item, active, t }: { item: ReviewSummary; active: boolean;
           <span className="text-faint">#{item.pr}</span>
         </code>
         <div className="mt-px truncate text-xs text-muted">
-          {item.title || t.recentReviews.untitled}
+          {item.title || t.reviewList.untitled}
         </div>
         <div className="mt-[3px] font-mono text-[10px] text-faint">
           {t.agent.completedAtPrefix}
@@ -129,9 +129,9 @@ function formatWhen(iso: string, t: Dict): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const delta = (Date.now() - d.getTime()) / 1000;
-  if (delta < 60) return t.recentReviews.justNow;
-  if (delta < 3600) return t.recentReviews.minutesAgo(Math.floor(delta / 60));
-  if (delta < 86400) return t.recentReviews.hoursAgo(Math.floor(delta / 3600));
-  if (delta < 7 * 86400) return t.recentReviews.daysAgo(Math.floor(delta / 86400));
-  return d.toLocaleDateString(t.recentReviews.dateLocale, { month: "2-digit", day: "2-digit" });
+  if (delta < 60) return t.reviewList.justNow;
+  if (delta < 3600) return t.reviewList.minutesAgo(Math.floor(delta / 60));
+  if (delta < 86400) return t.reviewList.hoursAgo(Math.floor(delta / 3600));
+  if (delta < 7 * 86400) return t.reviewList.daysAgo(Math.floor(delta / 86400));
+  return d.toLocaleDateString(t.reviewList.dateLocale, { month: "2-digit", day: "2-digit" });
 }
