@@ -42,7 +42,7 @@ GitHub App 安装后自动对 PR 进行评审的效果可以参考[这里](https
 
 几个限制也需要直接说明：
 
-- GitHub `ListFiles` 当前只取第一页，最多 100 个文件；超大 PR 会丢后续文件。
+- GitHub `ListFiles` 会翻页拉取，最多 30 页 × 100 个文件，即封顶 3000 个文件——这也是 GitHub 单个 PR 文件列表本身的上限，不是 LGTM 的限制；超预算裁剪是另一回事，由 `prctx` 处理并通过 `BudgetReport.Dropped` 上报。
 - L2 上下文当前主要是 patch hunk，`FileContext.FullText` 字段已预留，但真实文件全文还没有接入。
 - `LLM_PROVIDER=mock` 只能验证启动、拉取和 summary 流式输出；`risks` 和 `suggestions` 需要 JSON 输出，mock 默认回复不是 JSON，所以完整体验要接真实模型。
 - `backend/internal/review/orchestrator.go` 是早期占位。当前真实调度逻辑在 `backend/internal/api/review.go` 的 `mergeStages` 和相关函数里。
@@ -200,7 +200,7 @@ LLM 抽象在 `backend/internal/llm.Provider`，当前只有一个核心方法�
 
 - `summary` 是流式 markdown 生成，优先看稳定性和速度。
 - `risks` 和 `suggestions` 要求 JSON 输出。代码用 `response_format: json_object` 约束格式，然后在后端解析失败时发 `error` SSE event。
-- 代码层面 `SummaryStage`、`RisksStage`、`SuggestionsStage` 都预留了 `Model` 字段，可按 stage 覆盖模型；当前 main 里没有做 per-stage 路由，统一走 provider 默认模型。
+- 代码层面 `SummaryStage`、`RisksStage`、`SuggestionsStage` 都有 `Model` 字段。`POST /api/review` 接受请求体里的 `stage_models` map，按 stage 覆盖模型，解析优先级是 `stage_models[stage] > model > 部署方默认值`（见 `backend/internal/api/review.go:146`）；网页端已经有对应的按阶段选模型开关。
 
 Embedding 单独走 `index.Embedder`，不复用聊天模型。DeepSeek 目前没有 embedding API，所以真实 RAG 默认建议 `text-embedding-3-small` 或其他 OpenAI-compatible embedding 服务。没有 key 时降级 mock embedder，服务不断，但召回质量不可用于判断评审效果。
 
@@ -256,7 +256,7 @@ Agent 追问也是同一套思路：先把 L1/L3/L4 注入 prompt，再让工具
 - **更可靠的跨文件上下文**：当前 RAG 是文本 chunk + cosine。下一步更适合接 tree-sitter、LSP、调用图和类型信息，把“语义相近”升级成“真实引用关系”。
 - **异步索引和队列**：现在手动评审会同步写 PR hunk，容器启动可后台预索引。多租户后应把索引放到 worker，配 Redis Streams、Postgres job table 或队列服务，避免影响评审请求延迟。
 - **向量存储升级**：SQLite brute-force 对 demo 和小仓库够用；chunk 到万级以上可以换 sqlite-vss、pgvector 或 Qdrant。接口已经收敛在 `index.Retriever` 和 `index.Indexer`。
-- **按阶段模型路由**：summary、risk、suggestion 可以用不同模型和温度。风险判断阶段可尝试 reasoner 或二次验证模型，但需要评测集证明收益。
+- **按阶段的进阶路由**：按 stage 选择模型的开关已经上线（`stage_models`，见「模型选择」一节）；还没做的是按阶段自动调温度，以及给风险判断阶段接 reasoner 或二次验证模型，这些都需要评测集先证明收益。
 - **评测 harness**：准备一批带 ground truth 的 PR，记录误报、漏报、建议可应用率、耗时和成本。没有评测就很难判断模型切换是否真的变好。
 - **Agent 工具扩展**：当前是 PR 沙盒三件套 + RAG `search_repo`。未来可以接符号定义、测试结果、CI 日志、远端文件读取（带白名单和 rate limit），但每个工具都要有权限边界和调用预算。
 - **GitHub App 产品化**：webhook 当前直接起 goroutine，失败只记日志。生产版需要队列、重试、幂等 key、sticky comment 更新、更多 slash command 和更清晰的安装状态。

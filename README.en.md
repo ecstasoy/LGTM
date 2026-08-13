@@ -43,7 +43,7 @@ Reading a review needs no App installation. Installing the LGTM GitHub App on th
 
 A few limits are worth stating outright:
 
-- GitHub `ListFiles` currently reads only the first page, so at most 100 files; a very large PR loses everything after that.
+- GitHub `ListFiles` paginates up to 30 pages of 100, i.e. up to 3000 files — that is GitHub's own ceiling on a single PR's file list, not an LGTM limitation. Trimming for the token budget is a separate concern, handled in `prctx` and reported through `BudgetReport.Dropped`.
 - L2 context is patch hunks for now. The `FileContext.FullText` field is reserved, but full file text is not wired up yet.
 - `LLM_PROVIDER=mock` is only good for verifying that the service starts, that fetching works, and that the summary streams. `risks` and `suggestions` require JSON output, and the mock's default reply is not JSON, so the full experience needs a real model.
 - `backend/internal/review/orchestrator.go` is an early placeholder. The scheduling logic that actually runs lives in `mergeStages` and its neighbours in `backend/internal/api/review.go`.
@@ -201,7 +201,7 @@ The three stages ask different things of a model:
 
 - `summary` is streamed markdown generation, so stability and speed matter most.
 - `risks` and `suggestions` require JSON output. The code constrains the format with `response_format: json_object`, then emits an `error` SSE event when the backend fails to parse the reply.
-- In code, `SummaryStage`, `RisksStage`, and `SuggestionsStage` each reserve a `Model` field so a stage can override the model. `main` does not wire up per-stage routing today; every stage goes through the provider's default model.
+- In code, `SummaryStage`, `RisksStage`, and `SuggestionsStage` each carry a `Model` field. `POST /api/review` accepts a `stage_models` map in the request body, and resolution follows `stage_models[stage] > model > the deployment's default` (see `backend/internal/api/review.go:146`). The web UI already exposes a per-stage model picker for this.
 
 Embeddings go through `index.Embedder` separately rather than reusing the chat model. DeepSeek has no embedding API today, so real RAG defaults to `text-embedding-3-small` or another OpenAI-compatible embedding service. Without a key it degrades to the mock embedder, which keeps the service running, but recall quality is then useless for judging review quality.
 
@@ -257,7 +257,7 @@ For the minimal set of deployment commands, see [`docs/DEPLOY.md`](./docs/DEPLOY
 - **More reliable cross-file context**: RAG today is text chunks plus cosine similarity. The natural next step is tree-sitter, LSP, call graphs, and type information, upgrading "semantically similar" into "actually referenced".
 - **Async indexing and queues**: manual reviews write PR hunks synchronously today, and container startup can pre-index in the background. Once this is multi-tenant, indexing belongs in a worker backed by Redis Streams, a Postgres job table, or a queue service, so it does not add latency to review requests.
 - **A better vector store**: SQLite brute force is fine for the demo and small repositories; past roughly ten thousand chunks, sqlite-vss, pgvector, or Qdrant are worth the swap. The interfaces are already narrowed to `index.Retriever` and `index.Indexer`.
-- **Per-stage model routing**: summary, risk, and suggestion could each take a different model and temperature. The risk stage might benefit from a reasoning model or a second verification pass, but that needs an evaluation set to prove the gain.
+- **Smarter per-stage routing**: choosing a model per stage is already live (`stage_models`, see Model choice above). What's still missing is per-stage temperature tuning, and routing the risk stage to a reasoning model or a second verification pass — both need an evaluation set to prove the gain first.
 - **An evaluation harness**: assemble a batch of PRs with ground truth and record false positives, false negatives, how often a suggestion can actually be applied, latency, and cost. Without evaluation it is hard to tell whether a model swap genuinely improved anything.
 - **More agent tools**: today it is the three PR-sandbox tools plus RAG `search_repo`. Symbol definitions, test results, CI logs, and remote file reads (allowlisted and rate-limited) could follow, but every tool needs a permission boundary and a call budget.
 - **Productizing the GitHub App**: the webhook spawns a goroutine directly today and only logs failures. A production version needs a queue, retries, idempotency keys, sticky comment updates, more slash commands, and a clearer installation state.
