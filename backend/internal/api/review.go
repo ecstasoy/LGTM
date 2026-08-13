@@ -90,14 +90,14 @@ func indexPRChunks(ctx context.Context, idx index.Indexer, pr gh.PullRequest) {
 	slog.Info("indexed PR chunks", "scope", scope, "files", len(pr.Files), "chunks", len(chunks))
 }
 
-// effectiveDefaultLocale returns d.DefaultLocale, falling back to i18n.ZH when it is unset.
-// Deps.DefaultLocale is normalized once at startup (main.go); the fallback only matters for
-// callers that build a Deps by hand (unit tests, older call sites) without setting it.
+// effectiveDefaultLocale returns d.DefaultLocale normalized, falling back to i18n.ZH when it is unset or
+// unrecognized. Deps.DefaultLocale is normalized once at startup (main.go), so this re-normalization is
+// belt-and-suspenders: Deps is exported and i18n.Locale is a bare string type with no constructor gate, so a
+// future or alternate construction site could set it to something outside {"zh", "en"} without the compiler
+// noticing. Left unguarded, that value would flow straight into the cache key (same class of bug resolveLocale
+// exists to prevent at the request boundary).
 func effectiveDefaultLocale(d Deps) i18n.Locale {
-	if d.DefaultLocale == "" {
-		return i18n.ZH
-	}
-	return d.DefaultLocale
+	return i18n.Normalize(string(d.DefaultLocale), i18n.ZH)
 }
 
 // resolveLocale walks the request body > Accept-Language > configured default chain.

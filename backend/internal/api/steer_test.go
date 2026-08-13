@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,79 @@ func TestSteer_Suggestions_EmitsSteeredSuggestionsDone(t *testing.T) {
 	}
 	if !strings.Contains(body, "steered_suggestions_done") {
 		t.Errorf("expected steered_suggestions_done in body, got %s", body)
+	}
+}
+
+// TestSteer_Agent_EmitsBothReplyFrames drives mode=agent over HTTP and asserts both the new structured
+// agent_reply frame (steps/output as separate fields) and the legacy info frame (still Chinese prose) are
+// emitted together. Nothing else in this test suite exercises mode=agent end to end, so this is the only
+// guard against silently dropping either frame or translating the legacy one out from under the frontend's
+// regex (which still parses it until Task 21 retires it).
+func TestSteer_Agent_EmitsBothReplyFrames(t *testing.T) {
+	s := newTestStore(t)
+	id := seedSteerReview(t, s)
+	p := llm.NewMockProvider()
+	p.Reply = "concurrency looks fine here"
+	srv := startTestServer(t, Deps{Provider: p, Store: s})
+
+	res, body := postJSON(t, srv, "/api/review/"+id+"/steer",
+		map[string]string{"text": "深挖并发安全", "mode": "agent"})
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+
+	frames := parseSSE(body)
+	var (
+		gotAgentReply       bool
+		agentReplySteps     int
+		agentReplyOutput    string
+		gotLegacyCompletion bool
+		legacyCompletionMsg string
+	)
+	for _, f := range frames {
+		switch f.Type {
+		case "agent_reply":
+			gotAgentReply = true
+			var p struct {
+				Steps  int    `json:"steps"`
+				Output string `json:"output"`
+			}
+			if err := json.Unmarshal([]byte(f.Data), &p); err != nil {
+				t.Fatalf("decode agent_reply: %v (data=%s)", err, f.Data)
+			}
+			agentReplySteps = p.Steps
+			agentReplyOutput = p.Output
+		case "info":
+			var p struct {
+				Message string `json:"message"`
+				Stage   string `json:"stage"`
+			}
+			_ = json.Unmarshal([]byte(f.Data), &p)
+			// the agent path emits two info frames: a "启动" start frame and a "完成" completion frame;
+			// only the completion frame is the legacy string this test guards.
+			if p.Stage == "agent" && strings.HasPrefix(p.Message, "Agent 完成（") {
+				gotLegacyCompletion = true
+				legacyCompletionMsg = p.Message
+			}
+		}
+	}
+
+	if !gotAgentReply {
+		t.Fatal("missing agent_reply frame")
+	}
+	if agentReplySteps != 1 {
+		t.Errorf("agent_reply.steps = %d, want 1 (mock provider returns no tool calls)", agentReplySteps)
+	}
+	if !strings.Contains(agentReplyOutput, "concurrency looks fine here") {
+		t.Errorf("agent_reply.output = %q, want it to contain the mock reply", agentReplyOutput)
+	}
+
+	if !gotLegacyCompletion {
+		t.Fatal("missing legacy info completion frame; the frontend still regex-parses this exact Chinese string until Task 21")
+	}
+	wantLegacy := fmt.Sprintf("Agent 完成（%d 步）：%s", agentReplySteps, agentReplyOutput)
+	if legacyCompletionMsg != wantLegacy {
+		t.Errorf("legacy info message = %q, want %q (exact shape — a translated or reworded string breaks the frontend regex)", legacyCompletionMsg, wantLegacy)
 	}
 }
 
