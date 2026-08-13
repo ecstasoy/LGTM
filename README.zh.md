@@ -4,11 +4,6 @@
 
 LGTM 是一个面向 GitHub Pull Request 的评审助手。它会拉取 PR 元信息、diff、CI 状态和仓库约定文档，然后分三步生成变更摘要、风险列表和行内修改建议。登录后可以保存历史评审；安装 GitHub App 后，还能把建议发回 PR，或由 webhook 在新 PR 和 push 更新时自动评审。
 
-## Demo
-[Demo视频](https://screen.studio/share/qphlGDbQ)
-
-GitHub App 安装后自动对 PR 进行评审的效果可以参考[这里](https://github.com/ecstasoy/LGTM/pull/104)
-
 ## 在线试用
 
 线上地址：<https://lgtm-alpha.vercel.app>
