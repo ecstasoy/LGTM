@@ -24,7 +24,7 @@ Content-Type: application/json
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `url` | string | 是 | GitHub PR 链接；允许带 `/files` 后缀和末尾斜杠；前后空白自动 trim |
-| `locale` | string | 否 | 评审正文语言，`"zh"` / `"en"`。三级回退：请求体 → `Accept-Language` → `DEFAULT_LOCALE`；无法识别的值一律落回 `DEFAULT_LOCALE`，不报错。locale 是评审缓存唯一键的一部分，中英文各存一条 |
+| `locale` | string | 否 | 评审正文语言，`"zh"` / `"en"`。三级回退：请求体 → `Accept-Language` → `DEFAULT_LOCALE`；某一级的值无法识别时**落到下一级**（例如请求体传 `"fr"` 而 `Accept-Language: en-US` 时结果是 `en`），全部识别不了才用 `DEFAULT_LOCALE`，不报错。locale 是评审缓存唯一键的一部分，中英文各存一条 |
 
 ### 响应
 
@@ -143,7 +143,7 @@ Content-Type: application/json
 |---|---|---|---|
 | `text` | string | 是 | 用户引导文本 |
 | `mode` | string | 否 | `"stage"`（默认，重跑 stage）/ `"agent"`（跑 ReAct 循环 + 工具调用） |
-| `stage` | string | `mode=stage` 时是 | `"risks"` / `"suggestions"`；`mode=agent` 忽略 |
+| `stage` | string | 否 | `"risks"` / `"suggestions"`，`mode=stage` 下缺省为 `"risks"`；`mode=agent` 忽略 |
 | `locale` | string | 否 | 同 `POST /api/review`，回退链一致 |
 
 事件类型复用上面那张表；`risks_done` / `suggestions_done` 在这里改名为 `steered_risks_done` /
