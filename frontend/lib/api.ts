@@ -1,3 +1,4 @@
+import { ApiError } from "./errors";
 import type { ReviewDetail, ReviewSummary } from "./types";
 
 // postReview 已废弃 —— 后端 /api/review 改为 SSE，请改用 lib/sse.ts 的 streamReview
@@ -32,7 +33,8 @@ export async function listReviews(limit?: number): Promise<ReviewSummary[]> {
   const res = await fetch(`/api/reviews${q}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    const { error, code } = body as { error?: string; code?: string };
+    throw new ApiError(error ?? `HTTP ${res.status}`, code);
   }
   return res.json();
 }
@@ -42,7 +44,8 @@ export async function getReview(id: string): Promise<ReviewDetail> {
   const res = await fetch(`/api/reviews/${encodeURIComponent(id)}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    const { error, code } = body as { error?: string; code?: string };
+    throw new ApiError(error ?? `HTTP ${res.status}`, code);
   }
   return res.json();
 }

@@ -48,7 +48,7 @@ interface Msg {
 
 // AgentPanel 右侧 360px 抽屉 dock：追问这个 PR。
 // 接 streamSteer mode=agent：每次提问跑 agent.Run loop；
-// SSE tool_call_start/done → 在 chat 内插 tool message；info（"Agent 完成..."）→ assistant message。
+// SSE tool_call_start/done → 在 chat 内插 tool message；agent_reply → assistant message。
 export function AgentPanel({ onClose, reviewId }: Props) {
   const t = useT();
   // The greeting is NOT seeded into msgs: it's rendered straight from t.agent.introMessage below,
@@ -138,12 +138,12 @@ export function AgentPanel({ onClose, reviewId }: Props) {
               return [...next, fallback];
             });
           },
-          onInfo: (info) => {
-            // 后端两条 info：开头是 "Agent 启动..."（忽略）；结束是 "Agent 完成（N 步）：..."（assistant）
-            const finishMatch = info.match(/^Agent 完成（\d+ 步）：(.*)$/s);
-            if (finishMatch) {
-              setMsgs((m) => [...m, { role: "assistant", text: finishMatch[1].trim() }]);
-            }
+          // agent_reply (Task 19): the completion payload as structured fields (steps/output),
+          // not parsed out of the legacy "Agent 完成（N 步）：..." info string. This panel always
+          // runs mode="agent" (see the streamSteer call below), whose only other info frame is the
+          // agent-started notice — silently ignored here too, same as before this migration.
+          onAgentReply: (_steps, output) => {
+            setMsgs((m) => [...m, { role: "assistant", text: output }]);
           },
           onStageError: (_s, msg) => {
             setMsgs((m) => [...m, { role: "assistant", text: `❌ ${msg}` }]);

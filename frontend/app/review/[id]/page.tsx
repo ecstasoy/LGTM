@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
 
 import { getReview, STAGE_KEYS } from "@/lib/api";
 import { streamReview } from "@/lib/sse";
-import { friendlyError } from "@/lib/errors";
+import { ApiError, friendlyError } from "@/lib/errors";
 import type { BudgetReport, File, PrMeta, Risk, ReviewDetail, Suggestion } from "@/lib/types";
 import { ReviewTopBar, type ViewKey } from "@/components/review/ReviewTopBar";
 import { Sidebar } from "@/components/review/Sidebar";
@@ -19,7 +19,7 @@ import { DiffView } from "@/components/review/DiffView";
 import { AgentPanel } from "@/components/review/AgentPanel";
 import { AdoptProvider } from "@/components/review/AdoptContext";
 import { usePerms } from "@/lib/perms";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
 import {
   AgentSessionView,
   mergeToolDone,
@@ -53,6 +53,7 @@ export default function ReviewDetailPage({ params }: PageProps) {
 
 function ReviewDetailPageContent({ id }: { id: string }) {
   const t = useT();
+  const locale = useLocale();
   // Mutated on every render, read only when streamReview's async path actually throws — see the
   // comment on the data-fetching effect below for why t itself can't be a dependency there.
   const tRef = useRef(t);
@@ -91,8 +92,14 @@ function ReviewDetailPageContent({ id }: { id: string }) {
   const [suggestionsDone, setSuggestionsDone] = useState(false);
   const [streaming, setStreaming] = useState(isStreaming);
   const [info, setInfo] = useState<string | null>(null);
+  // agentReply: the agent loop's final answer via the structured agent_reply SSE frame (Task 19),
+  // rendered separately from `info` so it doesn't need the old regex to tell the two apart.
+  const [agentReply, setAgentReply] = useState<{ steps: number; output: string } | null>(null);
   const [stageErrors, setStageErrors] = useState<StageErrors>({});
   const [error, setError] = useState<string | null>(null);
+  // ApiError's `code`, kept alongside `error`'s message so friendlyError can look up copy by code
+  // instead of pattern-matching the raw string.
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
   // retryNonce 递增即重跑取数 effect；流式失败 / 超时后「重试」按钮用
   const [retryNonce, setRetryNonce] = useState(0);
@@ -154,6 +161,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
         onToolCallDone: (call) =>
           !cancelled && setToolEvents((prev) => mergeToolDone(prev, call)),
         onInfo: (m) => !cancelled && setInfo(m),
+        onAgentReply: (steps, output) => !cancelled && setAgentReply({ steps, output }),
         onStageError: (stage, msg) => {
           if (cancelled) return;
           if (stage === "summary") setSummaryDone(true);
@@ -164,10 +172,13 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           setSummaryDone(true);
         },
         onDone: () => !cancelled && (setSummaryDone(true), setStreaming(false)),
-      }, tRef, controller.signal, sourceModel, hasStageModels ? sourceStageModels : undefined)
+      }, tRef, locale, controller.signal, sourceModel, hasStageModels ? sourceStageModels : undefined)
         .catch((e) => {
           if (e instanceof DOMException && e.name === "AbortError") return;
-          if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+          if (!cancelled) {
+            setError(e instanceof Error ? e.message : String(e));
+            setErrorCode(e instanceof ApiError ? e.code : undefined);
+          }
         })
         .finally(() => {
           if (!cancelled) {
@@ -197,6 +208,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
         .catch((e) => {
           if (!cancelled) {
             setError(e instanceof Error ? e.message : String(e));
+            setErrorCode(e instanceof ApiError ? e.code : undefined);
             setLoaded(true);
           }
         });
@@ -208,12 +220,16 @@ function ReviewDetailPageContent({ id }: { id: string }) {
     // t/tRef is deliberately excluded here: restarting an in-flight SSE stream on every locale
     // toggle would throw away real streaming progress. streamReview reads the dictionary through
     // tRef.current at throw-time instead, so it still picks up a locale change without needing
-    // this effect to rerun.
+    // this effect to rerun. `locale` (the value sent in the request body) is excluded for the same
+    // reason: it's only read once, at the moment streamReview is called, so an in-flight stream
+    // keeps generating in whatever language it started with; a locale toggle takes effect on the
+    // next natural rerun of this effect (id change, retry, ...) rather than an immediate restart.
   }, [id, isStreaming, sourceURL, sourceModel, stageModelDep, retryNonce]);
 
   // 重试：清掉错误与上一轮部分结果，bump retryNonce 触发取数 effect 重跑
   const retry = useCallback(() => {
     setError(null);
+    setErrorCode(undefined);
     setLoaded(false);
     setStreaming(isStreaming);
     setSummary("");
@@ -222,6 +238,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
     setFiles([]);
     setBudget(null);
     setInfo(null);
+    setAgentReply(null);
     setStageErrors({});
     setSummaryDone(false);
     setRisksDone(false);
@@ -312,7 +329,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
         <Link href="/history" className="text-xs text-muted hover:text-text">
           {t.review.backToHistory}
         </Link>
-        <p className="text-sm text-fail">{friendlyError(error, t)}</p>
+        <p className="text-sm text-fail">{friendlyError(error, t, errorCode)}</p>
         <button
           type="button"
           onClick={retry}
@@ -373,6 +390,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
         <main ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-[1080px] flex-col gap-4 px-5 py-5">
             {info ? <InfoBanner info={info} /> : null}
+            {agentReply ? <AgentReplyBanner steps={agentReply.steps} output={agentReply.output} /> : null}
             {stageErrors.context ? (
               <StageErrorBanner stage={t.review.stageContext} message={stageErrors.context} />
             ) : null}
@@ -557,30 +575,35 @@ function StageErrorBanner({ stage, message }: { stage: string; message: string }
   );
 }
 
-// agentReplyPrefix 匹配后端 SSE info 帧的 Agent 完成模板
-// 命中即按 markdown 渲染 body（追问场景 LLM 输出含 ## / ``` / * 等格式）
-const agentReplyPrefix = /^Agent 完成（\d+ 步）：(.*)$/s;
-
-// infoProse Agent 回复 markdown 排版：与正文 text-sm 对齐；比 SummaryCard 更紧凑
+// infoProse: markdown spacing for both InfoBanner and AgentReplyBanner — aligned with body text-sm,
+// tighter than SummaryCard.
 const infoProse =
   "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-surface [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-surface [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-text";
 
+// InfoBanner: plain-text status line (e.g. the empty_pr notice, or a steer stage-rerun status
+// forwarded up from AgentSessionView). No longer regex-sniffs the text for an agent completion —
+// see AgentReplyBanner below, fed by the structured agent_reply SSE frame instead.
 function InfoBanner({ info }: { info: string }) {
-  const t = useT();
-  const m = info.match(agentReplyPrefix);
-  if (!m) {
-    return (
-      <div className="rounded-md border border-border bg-surface-2 px-4 py-3 text-sm text-text-2">
-        {info}
-      </div>
-    );
-  }
-  const body = m[1].trim();
   return (
     <div className="rounded-md border border-border bg-surface-2 px-4 py-3 text-sm text-text-2">
-      <div className="mb-2 text-xs text-muted">{t.review.agentReplyLabel}</div>
+      {info}
+    </div>
+  );
+}
+
+// AgentReplyBanner: the agent loop's final answer, sourced from the structured agent_reply SSE
+// frame (steps/output as separate fields, Task 19) rather than parsed out of the legacy
+// "Agent 完成（N 步）：..." info string. output goes straight to ReactMarkdown, unparsed.
+function AgentReplyBanner({ steps, output }: { steps: number; output: string }) {
+  const t = useT();
+  return (
+    <div className="rounded-md border border-border bg-surface-2 px-4 py-3 text-sm text-text-2">
+      <div className="mb-2 text-xs text-muted">
+        {t.review.agentReplyLabel}
+        {t.agent.agentStepsSuffix(steps)}
+      </div>
       <div className={infoProse}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{output}</ReactMarkdown>
       </div>
     </div>
   );

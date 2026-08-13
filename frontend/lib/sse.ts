@@ -1,4 +1,6 @@
 import type { Dict } from "./i18n/dictionaries/zh";
+import type { Locale } from "./i18n/locale";
+import { ApiError } from "./errors";
 import type {
   AgentToolCall,
   BudgetReport,
@@ -34,6 +36,9 @@ export interface StreamCallbacks {
   onToolCallStart?: (call: AgentToolCall) => void;
   onToolCallDone?: (call: AgentToolCall) => void;
   onAgentTextDelta?: (delta: string) => void;
+  // agent_reply: the agent loop's final answer, as structured fields (Task 19) rather than the
+  // baked-in-Chinese "Agent 完成（N 步）：..." string the legacy `info` frame still carries.
+  onAgentReply?: (steps: number, output: string) => void;
   onInfo?: (message: string) => void;
   onStageError?: (stage: string, message: string) => void;
   onStageDone?: (stage: string) => void;
@@ -95,16 +100,24 @@ export async function streamSteer(
 }
 
 // streamReview POSTs /api/review and dispatches the resulting SSE frames to the matching callback.
-// A synchronous 4xx/5xx throws directly; per-stage errors within the stream go through onStageError.
+// A synchronous 4xx/5xx throws an ApiError directly; per-stage errors within the stream go through
+// onStageError. `locale` is sent so the backend renders stage output (and its own error strings) in
+// the tab's active language; the backend falls back to Accept-Language then DEFAULT_LOCALE if omitted.
 export async function streamReview(
   url: string,
   cb: StreamCallbacks,
   t: DictRef,
+  locale: Locale,
   signal?: AbortSignal,
   model?: string,
   stageModels?: Record<string, string>,
 ): Promise<void> {
-  const payload: { url: string; model?: string; stage_models?: Record<string, string> } = { url };
+  const payload: {
+    url: string;
+    model?: string;
+    stage_models?: Record<string, string>;
+    locale: Locale;
+  } = { url, locale };
   if (model) payload.model = model;
   if (stageModels && Object.keys(stageModels).length > 0) payload.stage_models = stageModels;
   const res = await fetch("/api/review", {
@@ -115,8 +128,8 @@ export async function streamReview(
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    const msg = (data as { error?: string }).error ?? `HTTP ${res.status}`;
-    throw new Error(msg);
+    const { error, code } = data as { error?: string; code?: string };
+    throw new ApiError(error ?? `HTTP ${res.status}`, code);
   }
   if (!res.body) {
     throw new Error(t.current.errors.emptyResponseBody);
@@ -237,6 +250,11 @@ function dispatch(ev: ParsedFrame, cb: StreamCallbacks): void {
     case "agent_text_delta": {
       const p = parsed as { delta?: string };
       if (p.delta) cb.onAgentTextDelta?.(p.delta);
+      break;
+    }
+    case "agent_reply": {
+      const p = parsed as { steps?: number; output?: string };
+      if (p.output) cb.onAgentReply?.(p.steps ?? 0, p.output);
       break;
     }
     case "info": {

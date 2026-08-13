@@ -306,6 +306,23 @@ export const en: Dict = {
     notFoundTitle: "Page not found",
     notFoundBody: "The URL may be mistyped, or this review may have been deleted.",
     browseHistory: "Browse history",
+    // Keep this key set identical to zh.ts's byCode — see the comment there for why the type
+    // annotation is required.
+    byCode: {
+      not_logged_in: "Sign in first",
+      oauth_not_configured: "GitHub OAuth is not configured",
+      unknown_model: "Unknown model",
+      pr_not_found: "PR not found, or the repository is private",
+      github_forbidden: "GitHub denied the request (rate limited or insufficient permissions)",
+      no_push_permission: "No push permission (write or admin required)",
+      no_comment_permission: "No comment permission (triage, write, or admin required)",
+      suggestion_missing_anchor: "This suggestion has no file or line, so it cannot be anchored to the PR diff",
+      suggestion_missing_patch: "This suggestion has no committable change — use the Comment button to post it as plain text",
+      empty_pr: "This PR has no reviewable file changes",
+      history_login_required: "Sign in to view review history",
+      not_review_owner: "You can only delete reviews you created",
+      rate_limited: "Too many requests — please try again shortly",
+    } as Record<string, string>,
   },
   ui: {
     loadingLabel: "Loading",

@@ -289,6 +289,25 @@ export const zh = {
     notFoundTitle: "页面不存在",
     notFoundBody: "URL 可能拼错了，或者评审记录已被删除。",
     browseHistory: "浏览历史",
+    // Keyed by backend/internal/api/errcode.go's stable string constants (+ middleware/ratelimit.go's
+    // CodeRateLimited). `as Record<string, string>` is required: without it, `typeof zh` would lock this
+    // key set into a literal union, and every future backend code would need a matching frontend PR just
+    // to keep `en.ts` compiling.
+    byCode: {
+      not_logged_in: "请先登录",
+      oauth_not_configured: "GitHub OAuth 未配置",
+      unknown_model: "未知模型",
+      pr_not_found: "PR 不存在或为私有仓库",
+      github_forbidden: "GitHub 拒绝访问（速率限制或权限不足）",
+      no_push_permission: "无 push 权限（需 write / admin）",
+      no_comment_permission: "无评论权限（需 triage / write / admin）",
+      suggestion_missing_anchor: "该建议缺少文件或行号，无法定位到 PR diff",
+      suggestion_missing_patch: "该建议没有可提交的改动，请改用「评论」按钮发纯文字建议",
+      empty_pr: "该 PR 无可评审的文件改动",
+      history_login_required: "请先登录后查看评审历史",
+      not_review_owner: "只能删除你创建的评审",
+      rate_limited: "请求过于频繁，请稍后再试",
+    } as Record<string, string>,
   },
   ui: {
     loadingLabel: "加载中",
