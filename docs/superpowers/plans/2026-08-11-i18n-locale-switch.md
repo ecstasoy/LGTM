@@ -1684,6 +1684,14 @@ func resolveLocale(c *gin.Context, bodyLocale string, def i18n.Locale) i18n.Loca
 
 `i18n.Normalize` 传空 def 表示"没认出来",由调用方继续往下走。
 
+**安全要求（计划修订，Task 18 执行时发现）：locale 必须在请求边界归一化，不能把原始值透传下去。**
+
+`store.normalizeLocale` 只把 `""` 映射成 `"zh"`，其余原样落库——store 不做值域校验。而 `locale` 会是**第一个由攻击者控制的缓存键分量**（`owner`/`repo`/`pr`/`head_sha` 全部来自 GitHub）。评审时钉住的事实：`POST /api/reviews` 无登录门槛，限流是每 IP 5 次 / 25 秒且 cache 故障时 fail-open，所以 `{"locale":"en-x-1"}`、`en-x-2`…… 每个不同字符串都是必然 cache miss。
+
+注意评审对严重性的修正：**这不会新增 LLM 开销面**——今天指定任意非默认模型就已经能绕过缓存，且那条路径 `useCache=false` 连 `persistReview` 都跳过。locale 真正新增的是**无上界的行与索引增长**，因为它会落库。
+
+所以 `resolveLocale` 的返回值必须已经归一化过（`i18n.Normalize` 只会吐出 `zh` / `en` / 默认值），并且要有一个测试直接钉住这条：给请求体塞一个垃圾 locale，断言落库的 `Record.Locale` 仍在 `{zh, en}` 内。
+
 - [ ] **Step 4: 请求体加 locale 字段并接线**
 
 `review.go:106` 的匿名请求体结构加 `Locale string \`json:"locale"\``。把解析出的 locale 传给 `Orchestrator`、`Store.Get`、`Store.Put`（写入 `Record.Locale`）。per-stage / SSE 变体与 `steer.go` 同法处理。
