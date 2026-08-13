@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -446,5 +447,212 @@ func TestPutDefaultsEmptyLocaleToZh(t *testing.T) {
 	list, err := s.List(ctx, nil, 10)
 	if err != nil || len(list) != 1 || list[0].Locale != "zh" {
 		t.Fatalf("List must select locale, got %+v err=%v", list, err)
+	}
+}
+
+// sqliteSchemaVersion reads the header counter SQLite bumps on every schema change.
+// An unchanged value across a startup proves that startup issued no DDL at all.
+func sqliteSchemaVersion(t *testing.T, path string) int64 {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open for schema_version: %v", err)
+	}
+	defer db.Close()
+	var v int64
+	if err := db.QueryRow("PRAGMA schema_version").Scan(&v); err != nil {
+		t.Fatalf("read schema_version: %v", err)
+	}
+	return v
+}
+
+// sqliteIndexDefs maps index name to its CREATE statement for the reviews table.
+func sqliteIndexDefs(t *testing.T, path string) map[string]string {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open for index defs: %v", err)
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'reviews'`)
+	if err != nil {
+		t.Fatalf("read index defs: %v", err)
+	}
+	defer rows.Close()
+	defs := map[string]string{}
+	for rows.Next() {
+		var name string
+		var ddl sql.NullString
+		if err := rows.Scan(&name, &ddl); err != nil {
+			t.Fatalf("scan index def: %v", err)
+		}
+		defs[name] = ddl.String
+	}
+	return defs
+}
+
+func sqliteHasLocaleColumn(t *testing.T, path string) bool {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open for table_info: %v", err)
+	}
+	defer db.Close()
+	rows, err := db.Query("PRAGMA table_info(reviews)")
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid                 int
+			name, ctype         string
+			notNull, primaryKey int
+			dflt                sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &primaryKey); err != nil {
+			t.Fatalf("scan table_info: %v", err)
+		}
+		if name == "locale" {
+			return true
+		}
+	}
+	return false
+}
+
+// newLegacyDatabase writes a pre-i18n database file: no locale column, four-column unique indexes.
+func newLegacyDatabase(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(legacySchemaSQL); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	return path
+}
+
+// TestSchemaApplySkipsIndexDDLOnceMigrated is the steady-state guarantee: the first startup migrates,
+// every startup after it touches no schema, so restarts stop paying for an index rebuild.
+func TestSchemaApplySkipsIndexDDLOnceMigrated(t *testing.T) {
+	path := newLegacyDatabase(t)
+
+	beforeMigration := sqliteSchemaVersion(t, path)
+
+	s, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	afterMigration := sqliteSchemaVersion(t, path)
+	if afterMigration == beforeMigration {
+		t.Fatalf("first open should have migrated, schema_version stayed at %d", beforeMigration)
+	}
+	defs := sqliteIndexDefs(t, path)
+	if !reviewIndexesCarryLocale(defs) {
+		t.Fatalf("first open left indexes without locale: %+v", defs)
+	}
+
+	// Second startup: nothing to do, so nothing may be executed.
+	s2, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	if err := s2.Close(); err != nil {
+		t.Fatalf("close 2: %v", err)
+	}
+	afterRestart := sqliteSchemaVersion(t, path)
+	if afterRestart != afterMigration {
+		t.Fatalf("second startup issued DDL: schema_version %d -> %d", afterMigration, afterRestart)
+	}
+
+	// A third startup on the already-correct database must also be inert.
+	s3, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("third open: %v", err)
+	}
+	if err := s3.Close(); err != nil {
+		t.Fatalf("close 3: %v", err)
+	}
+	if v := sqliteSchemaVersion(t, path); v != afterMigration {
+		t.Fatalf("third startup issued DDL: schema_version %d -> %d", afterMigration, v)
+	}
+}
+
+// TestSchemaApplyRollsBackOnIndexFailure covers the crash window. The driver runs a multi-statement
+// script one statement at a time, so a mid-script failure without a transaction would commit the DROPs
+// and leave reviews with no unique index at all -- every Put would then fail on its ON CONFLICT clause.
+// Both injection points must leave the pre-i18n schema exactly as it was.
+func TestSchemaApplyRollsBackOnIndexFailure(t *testing.T) {
+	const boom = "CREATE INDEX idx_boom ON reviews(no_such_column);"
+	drops := "DROP INDEX IF EXISTS idx_reviews_public_unique;\nDROP INDEX IF EXISTS idx_reviews_user_unique;\n"
+
+	for _, tc := range []struct {
+		name     string
+		poisoned string
+	}{
+		// The dangerous window: both unique indexes are already gone when the failure lands.
+		{"fails between the drops and the creates", drops + boom + "\n" + indexesSQL},
+		{"fails after the creates", indexesSQL + "\n" + boom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := newLegacyDatabase(t)
+			before := sqliteIndexDefs(t, path)
+			beforeVersion := sqliteSchemaVersion(t, path)
+
+			db, err := sql.Open("sqlite3", path)
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			defer db.Close()
+
+			if err := applySQLiteSchema(context.Background(), db, schemaSQL, tc.poisoned); err == nil {
+				t.Fatal("poisoned index script should have failed")
+			}
+
+			after := sqliteIndexDefs(t, path)
+			for _, name := range reviewUniqueIndexNames {
+				ddl, ok := after[name]
+				if !ok {
+					t.Fatalf("rollback lost %s; the table is left with no unique index", name)
+				}
+				if strings.Contains(ddl, "locale") {
+					t.Fatalf("%s was left rebuilt after a failed migration: %s", name, ddl)
+				}
+				if ddl != before[name] {
+					t.Fatalf("%s changed across a failed migration:\n before: %s\n after:  %s", name, before[name], ddl)
+				}
+			}
+			if _, ok := after["idx_boom"]; ok {
+				t.Fatal("the failing statement's siblings were committed")
+			}
+			if sqliteHasLocaleColumn(t, path) {
+				t.Fatal("locale column survived a rolled-back migration")
+			}
+			if v := sqliteSchemaVersion(t, path); v != beforeVersion {
+				t.Fatalf("failed migration changed the schema: schema_version %d -> %d", beforeVersion, v)
+			}
+
+			// The database is still usable, and a later good startup still migrates it fully.
+			s, err := NewSQLiteStore(path)
+			if err != nil {
+				t.Fatalf("recovery open: %v", err)
+			}
+			defer s.Close()
+			if !reviewIndexesCarryLocale(sqliteIndexDefs(t, path)) {
+				t.Fatal("recovery open did not migrate the indexes")
+			}
+			if err := s.Put(context.Background(), &Record{
+				ID: "rec-recovered", Owner: "o", Repo: "r", PRNumber: 1, HeadSHA: "sha",
+				Locale: "en", Payload: json.RawMessage(`{}`), CreatedAt: time.Now(),
+			}); err != nil {
+				t.Fatalf("put after recovery: %v", err)
+			}
+		})
 	}
 }

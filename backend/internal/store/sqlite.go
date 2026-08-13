@@ -17,9 +17,15 @@ var schemaSQL string
 //go:embed indexes.sql
 var indexesSQL string
 
+// schemaExecutor is the subset of *sql.DB / *sql.Tx the startup migration needs.
+type schemaExecutor interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // ensureLocaleColumn backfills reviews.locale on databases created before i18n.
 // SQLite has no ADD COLUMN IF NOT EXISTS, so probe the table first.
-func ensureLocaleColumn(ctx context.Context, db *sql.DB) error {
+func ensureLocaleColumn(ctx context.Context, db schemaExecutor) error {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info(reviews)")
 	if err != nil {
 		return fmt.Errorf("inspect reviews: %w", err)
@@ -57,6 +63,67 @@ func ensureLocaleColumn(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// sqliteReviewIndexesCarryLocale reads the live index definitions out of sqlite_master.
+func sqliteReviewIndexesCarryLocale(ctx context.Context, db schemaExecutor) (bool, error) {
+	const q = `SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'reviews'`
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return false, fmt.Errorf("inspect reviews indexes: %w", err)
+	}
+	defer rows.Close()
+
+	defs := make(map[string]string)
+	for rows.Next() {
+		var (
+			name string
+			ddl  sql.NullString // NULL for the auto-indexes SQLite creates for PRIMARY KEY
+		)
+		if err := rows.Scan(&name, &ddl); err != nil {
+			return false, fmt.Errorf("scan reviews index: %w", err)
+		}
+		defs[name] = ddl.String
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("inspect reviews indexes: %w", err)
+	}
+	return reviewIndexesCarryLocale(defs), nil
+}
+
+// applySQLiteSchema runs the three ordered startup phases: create tables, backfill locale, rebuild indexes.
+// The order is load-bearing because the indexes reference locale.
+//
+// The whole thing is one transaction. SQLite DDL is transactional, and the driver runs a multi-statement
+// script one statement at a time, so without it a failure between the DROPs and the CREATEs would commit
+// the drops and leave the table with no unique index at all — every Put would then fail on its ON CONFLICT
+// clause, and a duplicate slipping in would make the next startup unable to recreate the index.
+//
+// The index script is skipped entirely once the live indexes already key on locale, so a steady-state
+// startup issues no DDL: no repeated index rebuild, and on the Postgres side no lock at all.
+func applySQLiteSchema(ctx context.Context, db *sql.DB, schema, indexes string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin schema tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op once Commit succeeded
+
+	if _, err := tx.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("apply schema: %w", err)
+	}
+	if err := ensureLocaleColumn(ctx, tx); err != nil {
+		return err
+	}
+	upToDate, err := sqliteReviewIndexesCarryLocale(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !upToDate {
+		if _, err := tx.ExecContext(ctx, indexes); err != nil {
+			return fmt.Errorf("apply indexes: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 // SQLiteStore 单文件 SQLite 实现 Store。
 type SQLiteStore struct {
 	db *sql.DB
@@ -77,19 +144,9 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	// Three ordered phases; the order is load-bearing because the indexes reference locale.
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("apply schema: %w", err)
-	}
-	if err := ensureLocaleColumn(ctx, db); err != nil {
+	if err := applySQLiteSchema(context.Background(), db, schemaSQL, indexesSQL); err != nil {
 		_ = db.Close()
 		return nil, err
-	}
-	if _, err := db.ExecContext(ctx, indexesSQL); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("apply indexes: %w", err)
 	}
 	return &SQLiteStore{db: db}, nil
 }

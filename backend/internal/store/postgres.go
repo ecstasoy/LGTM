@@ -48,17 +48,59 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("postgres ping: %w", err)
 	}
-	// Two ordered phases; the order is load-bearing because the indexes reference locale.
-	// The locale backfill lives at the end of postgres_schema.sql: PG has ADD COLUMN IF NOT EXISTS.
-	if _, err := db.ExecContext(ctx, postgresSchemaSQL); err != nil {
+	if err := applyPostgresSchema(ctx, db, postgresSchemaSQL, postgresIndexesSQL); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("postgres apply schema: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, postgresIndexesSQL); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("postgres apply indexes: %w", err)
+		return nil, err
 	}
 	return &PostgresStore{db: db}, nil
+}
+
+// pgReviewIndexesCarryLocale reads the live index definitions out of pg_indexes.
+func pgReviewIndexesCarryLocale(ctx context.Context, db *sql.DB) (bool, error) {
+	const q = `SELECT indexname, indexdef FROM pg_indexes
+	           WHERE tablename = 'reviews' AND schemaname = current_schema()`
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return false, fmt.Errorf("postgres inspect reviews indexes: %w", err)
+	}
+	defer rows.Close()
+
+	defs := make(map[string]string)
+	for rows.Next() {
+		var name, ddl string
+		if err := rows.Scan(&name, &ddl); err != nil {
+			return false, fmt.Errorf("postgres scan reviews index: %w", err)
+		}
+		defs[name] = ddl
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("postgres inspect reviews indexes: %w", err)
+	}
+	return reviewIndexesCarryLocale(defs), nil
+}
+
+// applyPostgresSchema runs the same ordered phases as the SQLite path: create tables, backfill locale,
+// rebuild indexes. PG has ADD COLUMN IF NOT EXISTS, so the backfill is the last statement of the schema
+// script rather than a probe.
+//
+// Skipping the index script once the indexes already key on locale is what keeps the ACCESS EXCLUSIVE
+// lock its DROPs take off the steady-state startup path: the script runs as one implicit transaction,
+// so that lock would otherwise be held across both index builds, blocking readers as well as writers.
+func applyPostgresSchema(ctx context.Context, db *sql.DB, schema, indexes string) error {
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("postgres apply schema: %w", err)
+	}
+	upToDate, err := pgReviewIndexesCarryLocale(ctx, db)
+	if err != nil {
+		return err
+	}
+	if upToDate {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, indexes); err != nil {
+		return fmt.Errorf("postgres apply indexes: %w", err)
+	}
+	return nil
 }
 
 // Close 关闭底层 db handle。

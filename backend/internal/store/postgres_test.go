@@ -168,6 +168,20 @@ func TestPostgresZhAndEnReviewsCoexist(t *testing.T) {
 	}
 }
 
+// legacyPostgresSchema rebuilds the pre-i18n table: no locale column, four-column unique indexes.
+var legacyPostgresSchema = []string{
+	`DROP TABLE IF EXISTS reviews`,
+	`CREATE TABLE reviews (
+		id TEXT PRIMARY KEY, user_id TEXT, owner TEXT NOT NULL, repo TEXT NOT NULL,
+		pr_number BIGINT NOT NULL, head_sha TEXT NOT NULL, payload BYTEA NOT NULL,
+		created_at BIGINT NOT NULL)`,
+	`CREATE UNIQUE INDEX idx_reviews_public_unique
+		ON reviews(owner, repo, pr_number, head_sha) WHERE user_id IS NULL`,
+	`CREATE UNIQUE INDEX idx_reviews_user_unique
+		ON reviews(user_id, owner, repo, pr_number, head_sha) WHERE user_id IS NOT NULL`,
+	`CREATE INDEX idx_reviews_user ON reviews(user_id, created_at DESC)`,
+}
+
 // TestPostgresSchemaApplyIsIdempotentOnLegacyDatabases mirrors the SQLite migration test:
 // a pre-i18n table plus the old four-column indexes must migrate in place and survive a restart.
 func TestPostgresSchemaApplyIsIdempotentOnLegacyDatabases(t *testing.T) {
@@ -175,19 +189,7 @@ func TestPostgresSchemaApplyIsIdempotentOnLegacyDatabases(t *testing.T) {
 	ctx := context.Background()
 
 	// Tear the schema back down to its pre-i18n shape, rows included.
-	legacy := []string{
-		`DROP TABLE IF EXISTS reviews`,
-		`CREATE TABLE reviews (
-			id TEXT PRIMARY KEY, user_id TEXT, owner TEXT NOT NULL, repo TEXT NOT NULL,
-			pr_number BIGINT NOT NULL, head_sha TEXT NOT NULL, payload BYTEA NOT NULL,
-			created_at BIGINT NOT NULL)`,
-		`CREATE UNIQUE INDEX idx_reviews_public_unique
-			ON reviews(owner, repo, pr_number, head_sha) WHERE user_id IS NULL`,
-		`CREATE UNIQUE INDEX idx_reviews_user_unique
-			ON reviews(user_id, owner, repo, pr_number, head_sha) WHERE user_id IS NOT NULL`,
-		`CREATE INDEX idx_reviews_user ON reviews(user_id, created_at DESC)`,
-	}
-	for _, stmt := range legacy {
+	for _, stmt := range legacyPostgresSchema {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			t.Fatalf("build legacy schema: %v", err)
 		}
@@ -233,6 +235,77 @@ func TestPostgresSchemaApplyIsIdempotentOnLegacyDatabases(t *testing.T) {
 		}
 		if err := migrated.Close(); err != nil {
 			t.Fatalf("close %d: %v", i, err)
+		}
+	}
+}
+
+// pgIndexOIDs maps index name to its pg_class OID. A DROP + CREATE always mints a new OID,
+// so unchanged OIDs across a startup prove that startup issued no index DDL.
+func pgIndexOIDs(t *testing.T, s *PostgresStore) map[string]int64 {
+	t.Helper()
+	rows, err := s.db.QueryContext(context.Background(),
+		`SELECT c.relname, c.oid::bigint FROM pg_class c
+		 JOIN pg_index i ON i.indexrelid = c.oid
+		 WHERE i.indrelid = 'reviews'::regclass`)
+	if err != nil {
+		t.Fatalf("read index oids: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var name string
+		var oid int64
+		if err := rows.Scan(&name, &oid); err != nil {
+			t.Fatalf("scan index oid: %v", err)
+		}
+		out[name] = oid
+	}
+	return out
+}
+
+// TestPostgresSchemaApplySkipsIndexDDLOnceMigrated is the steady-state guarantee on PG: skipping the
+// index script keeps the ACCESS EXCLUSIVE lock its DROPs take off every restart after the first.
+func TestPostgresSchemaApplySkipsIndexDDLOnceMigrated(t *testing.T) {
+	s := postgresTestStore(t)
+	ctx := context.Background()
+	dsn := os.Getenv("PG_TEST_URL")
+
+	// Tear back down to the pre-i18n shape so the next open has real work to do.
+	for _, stmt := range legacyPostgresSchema {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("build legacy schema: %v", err)
+		}
+	}
+	beforeMigration := pgIndexOIDs(t, s)
+
+	migrated, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	afterMigration := pgIndexOIDs(t, migrated)
+	for _, name := range reviewUniqueIndexNames {
+		if afterMigration[name] == beforeMigration[name] {
+			t.Fatalf("%s was not rebuilt by the migrating startup (oid %d)", name, afterMigration[name])
+		}
+	}
+	if err := migrated.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Second and third startups must touch nothing.
+	for i := range 2 {
+		restarted, err := NewPostgresStore(dsn)
+		if err != nil {
+			t.Fatalf("restart %d: %v", i, err)
+		}
+		got := pgIndexOIDs(t, restarted)
+		for name, oid := range afterMigration {
+			if got[name] != oid {
+				t.Fatalf("restart %d rebuilt %s: oid %d -> %d", i, name, oid, got[name])
+			}
+		}
+		if err := restarted.Close(); err != nil {
+			t.Fatalf("close restart %d: %v", i, err)
 		}
 	}
 }
