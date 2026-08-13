@@ -20,6 +20,7 @@ import { AgentPanel } from "@/components/review/AgentPanel";
 import { AdoptProvider } from "@/components/review/AdoptContext";
 import { usePerms } from "@/lib/perms";
 import { useLocale, useT } from "@/lib/i18n/context";
+import { shouldShowLocaleNotice } from "@/lib/i18n/review-locale";
 import {
   AgentSessionView,
   mergeToolDone,
@@ -81,6 +82,11 @@ function ReviewDetailPageContent({ id }: { id: string }) {
 
   // 统一状态形状：cached 模式一次填齐，streaming 模式逐步填
   const [pr, setPr] = useState<PrMeta | null>(null);
+  // reviewLocale: the language this stored review was generated in (cached mode only — a streaming
+  // review is, by construction, generated in the locale just requested, so it can never disagree
+  // with the current UI locale within the same page load). undefined means "no cached detail yet" /
+  // "streaming" / "pre-i18n record with no locale on file" — all three read as unknown, never as "zh".
+  const [reviewLocale, setReviewLocale] = useState<"zh" | "en" | undefined>(undefined);
   const [summary, setSummary] = useState("");
   const [risks, setRisks] = useState<Risk[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -204,6 +210,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
             setRisksDone,
             setSuggestionsDone,
             setStreaming,
+            setReviewLocale,
           });
           setLoaded(true);
         })
@@ -239,6 +246,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
     setSuggestions([]);
     setFiles([]);
     setBudget(null);
+    setReviewLocale(undefined);
     setInfo(null);
     setAgentReply(null);
     setStageErrors({});
@@ -408,6 +416,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
                 streaming={streaming}
                 stageErrors={stageErrors}
                 budget={budget}
+                reviewLocale={reviewLocale}
                 onPickRisk={pickRisk}
               />
             ) : view === "diff" ? (
@@ -473,6 +482,7 @@ interface HydrateSetters {
   setRisksDone: (b: boolean) => void;
   setSuggestionsDone: (b: boolean) => void;
   setStreaming: (b: boolean) => void;
+  setReviewLocale: (l: "zh" | "en" | undefined) => void;
 }
 
 // hydrateFromDetail 把 cached detail 一次填齐到所有 state
@@ -502,6 +512,7 @@ function hydrateFromDetail(d: ReviewDetail, h: HydrateSetters) {
   h.setSuggestions(d.suggestions ?? []);
   h.setFiles(d.files ?? []);
   h.setBudget(d.budget_report ?? null);
+  h.setReviewLocale(d.locale);
   h.setSummaryDone(true);
   h.setRisksDone(true);
   h.setSuggestionsDone(true);
@@ -516,6 +527,7 @@ function ReportContent({
   streaming,
   stageErrors,
   budget,
+  reviewLocale,
   onPickRisk,
 }: {
   summary: string;
@@ -525,12 +537,17 @@ function ReportContent({
   streaming: boolean;
   stageErrors: StageErrors;
   budget: BudgetReport | null;
+  reviewLocale: "zh" | "en" | undefined;
   onPickRisk: (r: Risk) => void;
 }) {
   const t = useT();
+  const locale = useLocale();
   const dropped = budget?.dropped ?? [];
   return (
     <>
+      {shouldShowLocaleNotice(reviewLocale, locale) ? (
+        <LocaleNotice reviewLocale={reviewLocale} />
+      ) : null}
       {dropped.length > 0 ? <DroppedFilesNotice files={dropped} /> : null}
       {stageErrors.summary ? (
         <StageErrorBanner stage={t.review.stageSummary} message={stageErrors.summary} />
@@ -547,6 +564,20 @@ function ReportContent({
         <p className="text-sm text-faint">{t.review.scanningRisks}</p>
       ) : null}
     </>
+  );
+}
+
+// LocaleNotice: shown when this stored review's language differs from the current UI locale — the
+// review keeps the language it was generated in (product decision), so this just explains why the
+// body reads in a different language than the rest of the page. reviewLocale drives the copy, not
+// the current UI locale, so the language name interpolated is always the review's own language.
+function LocaleNotice({ reviewLocale }: { reviewLocale: "zh" | "en" }) {
+  const t = useT();
+  const languageName = reviewLocale === "zh" ? t.review.languageNameZh : t.review.languageNameEn;
+  return (
+    <p className="mb-3 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
+      {t.review.generatedInOtherLocale(languageName)}
+    </p>
   );
 }
 

@@ -190,6 +190,9 @@ export const zh = {
     adoptedChipLabel: (n: number, total: number) => `采纳 ${n}/${total}`,
     inlineSuggestionsHeading: (n: number) => `行内建议（${n}）`,
     suggestionCountBadge: (n: number) => `${n} 条`,
+    generatedInOtherLocale: (language: string) => `本评审生成于${language}，正文保持原样。`,
+    languageNameZh: "中文",
+    languageNameEn: "英文",
   },
   agent: {
     sessionTitle: (owner: string, repo: string, pr: number) => `评审 ${owner}/${repo}#${pr}`,

@@ -12,7 +12,8 @@ import { useMe } from "@/lib/auth";
 import { deleteReview } from "@/lib/reviews";
 import { CIStatus, type CIStatusValue } from "@/components/ui/ci-status";
 import { RiskPips } from "@/components/landing/RiskPips";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
+import { shouldShowLocaleNotice } from "@/lib/i18n/review-locale";
 import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 const ZERO_COUNTS = { high: 0, medium: 0, low: 0 } as const;
@@ -230,6 +231,9 @@ function Row({
 }) {
   // Delete button visibility: signed in + (I'm the owner OR it's a legacy anonymous record).
   const canDelete = !!myLogin && (!review.created_by || review.created_by === myLogin);
+  // Badge visibility: only when this review's stored locale is known AND differs from the current
+  // UI locale. Absent (pre-i18n record) never badges — see cachedPayload.Locale's comment.
+  const uiLocale = useLocale();
   return (
     <div
       className={cn(
@@ -249,7 +253,12 @@ function Row({
           {review.owner}/{review.repo}
           <span className="text-faint">#{review.pr}</span>
         </code>
-        <span className="truncate text-sm">{review.title || t.history.untitled}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm">{review.title || t.history.untitled}</span>
+          {shouldShowLocaleNotice(review.locale, uiLocale) ? (
+            <LocaleBadge locale={review.locale} />
+          ) : null}
+        </span>
         <RiskPips counts={review.risk_counts ?? ZERO_COUNTS} />
         <code className="font-mono text-xs text-faint">{review.head_sha.slice(0, 7)}</code>
         <span className="text-right text-xs text-faint">{formatRelative(review.created_at, t)}</span>
@@ -270,6 +279,17 @@ function Row({
         </button>
       ) : null}
     </div>
+  );
+}
+
+// LocaleBadge: marks a history row whose stored review locale differs from the current UI locale.
+// Renders the locale *code* (ZH / EN), not a translated language name — matching the code, not a
+// display string, is what the row's `review.locale !== uiLocale` comparison above already does.
+function LocaleBadge({ locale }: { locale: "zh" | "en" }) {
+  return (
+    <span className="shrink-0 rounded-sm border border-border-strong bg-surface-2 px-1 py-[1px] font-mono text-[9px] font-semibold uppercase tracking-wider text-muted">
+      {locale}
+    </span>
   );
 }
 

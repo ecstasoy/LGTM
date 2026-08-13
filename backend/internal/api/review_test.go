@@ -692,6 +692,44 @@ func TestPostReview_CacheMiss_PersistsAllMetaFields(t *testing.T) {
 	}
 }
 
+// TestPostReview_PersistsLocale confirms the request's resolved locale ends up in the cached
+// payload verbatim, so a later /api/reviews/:id read can tell what language this review was
+// generated in (Task 22).
+func TestPostReview_PersistsLocale(t *testing.T) {
+	s := newTestStore(t)
+	srv := startTestServer(t, Deps{
+		Fetcher: fakeFetcher{pr: samplePRWithMeta()},
+		Provider: dualMockProvider{
+			textReply: "summary text",
+			jsonReply: `{"risks":[],"suggestions":[]}`,
+		},
+		Store: s,
+	})
+
+	res, body := postJSON(t, srv, "/api/review", map[string]string{
+		"url":    "https://github.com/golang/go/pull/42",
+		"locale": "en",
+	})
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", "en")
+	if err != nil {
+		t.Fatalf("store.Get: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("缓存应按 locale=en 写入")
+	}
+	var p cachedPayload
+	if err := json.Unmarshal(rec.Payload, &p); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if p.Locale != "en" {
+		t.Errorf("payload.locale 应为 en，得到 %q", p.Locale)
+	}
+}
+
 func TestPostReview_CacheMiss_PersistsFiles(t *testing.T) {
 	s := newTestStore(t)
 	pr := samplePR()

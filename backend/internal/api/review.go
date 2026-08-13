@@ -369,6 +369,7 @@ func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, sugg
 		Author:       pr.Author,
 		AuthorRole:   pr.AuthorRole,
 		Lang:         detectPrimaryLang(pr.Files),
+		Locale:       locale,
 		State:        pr.State,
 		Labels:       pr.Labels,
 		BaseRef:      pr.BaseRef,

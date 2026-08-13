@@ -17,13 +17,19 @@ import (
 // Every new field is omitempty: older cache entries lack them, and this keeps that JSON clean,
 // with the frontend treating a missing field as unknown.
 type cachedPayload struct {
-	Title       string          `json:"title,omitempty"`
+	Title string `json:"title,omitempty"`
 	// Source records how this review was triggered: "manual" for a user-pasted URL, "webhook" for a GitHub-pushed auto review
 	// The frontend renders the ⚡ "auto" chip and fires the toast notification off this field
-	Source      string          `json:"source,omitempty"`
-	Author      string          `json:"author,omitempty"`
-	AuthorRole  string          `json:"author_role,omitempty"`
-	Lang        string          `json:"lang,omitempty"` // the PR's primary language (majority vote over file extensions); used by the /history language filter
+	Source     string `json:"source,omitempty"`
+	Author     string `json:"author,omitempty"`
+	AuthorRole string `json:"author_role,omitempty"`
+	Lang       string `json:"lang,omitempty"` // the PR's primary language (majority vote over file extensions); used by the /history language filter
+	// Locale is the review output language ("zh" | "en") resolved for this request (see resolveLocale).
+	// Rows written before this field existed have no "locale" key in their stored JSON, so they decode
+	// as "" regardless of what the reviews.locale column says (that column's own pre-i18n backfill
+	// defaults every old row to "zh" — see store.ensureLocaleColumn — but the frontend never reads that
+	// column; it only ever sees this payload field). The frontend treats "" as unknown and shows no notice.
+	Locale      string          `json:"locale,omitempty"`
 	State       string          `json:"state,omitempty"`
 	Labels      []string        `json:"labels,omitempty"`
 	BaseRef     string          `json:"base_ref,omitempty"`

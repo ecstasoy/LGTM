@@ -204,6 +204,10 @@ export const en: Dict = {
     adoptedChipLabel: (n: number, total: number) => `${n}/${total} adopted`,
     inlineSuggestionsHeading: (n: number) => `Inline suggestions (${n})`,
     suggestionCountBadge: (n: number) => (n === 1 ? "1 suggestion" : `${n} suggestions`),
+    generatedInOtherLocale: (language: string) =>
+      `This review was generated in ${language}; the text is shown as written.`,
+    languageNameZh: "Chinese",
+    languageNameEn: "English",
   },
   agent: {
     sessionTitle: (owner: string, repo: string, pr: number) => `Review ${owner}/${repo}#${pr}`,
