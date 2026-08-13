@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
@@ -36,7 +37,7 @@ func TestSuggestionsStage_Run_WithPatch(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"suggestions":[{"file":"main.go","line":42,"type":"bug","title":"加锁防竞态","body":"在写 s.items 前加 s.mu.Lock()","patch":{"lang":"go","before":"s.items[k] = v","after":"s.mu.Lock()\ns.items[k] = v\ns.mu.Unlock()"}}]}`
 
-	ch, err := SuggestionsStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestSuggestionsStage_Run_WithoutPatch(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"suggestions":[{"file":"util.go","line":10,"type":"style","title":"重命名变量","body":"x 改成 idx 更清晰","patch":null}]}`
 
-	ch, err := SuggestionsStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestSuggestionsStage_Run_Empty(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"suggestions":[]}`
 
-	ch, err := SuggestionsStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestSuggestionsStage_Run_MalformedJSON(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = "not json"
 
-	ch, err := SuggestionsStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestSuggestionsStage_Run_MissingArray(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{}`
 
-	ch, err := SuggestionsStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestSuggestionsStage_Run_MissingArray(t *testing.T) {
 }
 
 func TestSuggestionsStage_Run_StreamError(t *testing.T) {
-	_, err := SuggestionsStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, errProvider{err: streamErr{msg: "stream failed"}})
+	_, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, errProvider{err: streamErr{msg: "stream failed"}})
 	if err == nil {
 		t.Fatal("期望同步 Stream 错误向上冒")
 	}

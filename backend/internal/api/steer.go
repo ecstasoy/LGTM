@@ -14,10 +14,55 @@ import (
 
 	"github.com/ecstasoy/LGTM/backend/internal/agent"
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/memory"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
+
+// agentSystemByLocale carries the localized fragments of the agent's system prompt. steer.go assembles the final
+// prompt by concatenating the fragments that apply (search_repo tool present, session history non-empty).
+// Kept separate from the stage system-prompt maps in internal/review: this is a different job (multi-turn tool-using
+// agent vs. single-shot stage) and its wording will diverge over time.
+var agentSystemByLocale = map[i18n.Locale]struct {
+	Intro          string
+	KeyHint        string
+	Tools          string
+	SearchRepoTool string
+	History        string
+	Output         string
+}{
+	i18n.ZH: {
+		Intro: "你是 code reviewer agent。回答 PR 相关问题。\n\n",
+		KeyHint: "## 关键：先看「相关代码」段\n" +
+			"prompt 末尾「## 相关代码（跨文件 RAG 召回）」段已是基于用户问题语义召回的本仓库相关代码（可能来自本 PR 也可能来自 main 上未在本 PR 改动的文件）。" +
+			"**如果该段已包含足以回答问题的内容，直接基于它给答案，不要调工具。**\n\n",
+		Tools: "## 工具\n" +
+			"- `read_file` / `list_dir` / `grep_patches`：仅限**本 PR 改动文件**沙盒，跨出会被拒绝。",
+		SearchRepoTool: "\n" +
+			"- `search_repo`：在全仓 RAG 索引按 query 语义检索。**只在「相关代码」段不够回答时**才调，并换一个更精准的 query（如具体函数名 / 模块名），避免与初始召回重复。",
+		History: "\n\n## 会话历史\n" +
+			"用户和你之前已有过多轮对话（下方 messages 含历史 user/assistant 交替）。" +
+			"回答时延续上下文 —— 若用户说『那个』『它』『上面提到的』等指代，应解析到历史中的具体对象。",
+		Output: "\n\n## 输出\n" +
+			"用一段简洁中文文字回答（不要 JSON）。优先引用具体文件路径 + 行为，让读者能直接定位。",
+	},
+	i18n.EN: {
+		Intro: "You are a code reviewer agent. Answer PR-related questions.\n\n",
+		KeyHint: "## Key: check the \"Related code\" section first\n" +
+			"The end of the prompt has a \"## Related code (cross-file RAG retrieval)\" section, already retrieved by semantic search against the user's question (it may come from this PR or from files on main that this PR did not touch). " +
+			"**If that section already contains enough to answer, answer from it directly — do not call a tool.**\n\n",
+		Tools: "## Tools\n" +
+			"- `read_file` / `list_dir` / `grep_patches`: sandboxed to **files this PR changed** only; anything outside is rejected.",
+		SearchRepoTool: "\n" +
+			"- `search_repo`: semantic search over the whole-repo RAG index. **Call it only when the \"Related code\" section is not enough to answer**, and use a sharper query (e.g. a specific function or module name) so it doesn't just repeat the initial retrieval.",
+		History: "\n\n## Conversation history\n" +
+			"You and the user have already exchanged several turns (the messages below alternate user/assistant history). " +
+			"Keep continuity when answering — if the user says \"that\", \"it\", or \"the thing mentioned above\", resolve it to the concrete object from history.",
+		Output: "\n\n## Output\n" +
+			"Answer in a concise paragraph of English (no JSON). Prefer citing concrete file paths and line numbers so the reader can go straight there.",
+	},
+}
 
 // Allowlist of stages a steer may rerun. Rerunning summary pays off poorly (expensive, and follow-ups are mostly about risks / suggestions), so it stays closed for now.
 // The actual Stage is built by newStage with that stage's model (the same L1 routing as mergeStages).
@@ -199,23 +244,17 @@ func PostSteer(d Deps) gin.HandlerFunc {
 
 			// strong steer: L4 already has RAG context → answer from it directly rather than spinning on tool calls
 			// PR sandbox tools + optional search_repo (depending on whether a retriever was injected)
-			sysPrompt := "你是 code reviewer agent。回答 PR 相关问题。\n\n" +
-				"## 关键：先看「相关代码」段\n" +
-				"prompt 末尾「## 相关代码（跨文件 RAG 召回）」段已是基于用户问题语义召回的本仓库相关代码（可能来自本 PR 也可能来自 main 上未在本 PR 改动的文件）。" +
-				"**如果该段已包含足以回答问题的内容，直接基于它给答案，不要调工具。**\n\n" +
-				"## 工具\n" +
-				"- `read_file` / `list_dir` / `grep_patches`：仅限**本 PR 改动文件**沙盒，跨出会被拒绝。"
+			// TODO(next i18n task): resolve locale from the request instead of hardcoding ZH; Deps carries no locale yet.
+			locale := i18n.ZH
+			frag := agentSystemByLocale[locale]
+			sysPrompt := frag.Intro + frag.KeyHint + frag.Tools
 			if hasSearchRepo {
-				sysPrompt += "\n" +
-					"- `search_repo`：在全仓 RAG 索引按 query 语义检索。**只在「相关代码」段不够回答时**才调，并换一个更精准的 query（如具体函数名 / 模块名），避免与初始召回重复。"
+				sysPrompt += frag.SearchRepoTool
 			}
 			if len(priorTurns) > 0 {
-				sysPrompt += "\n\n## 会话历史\n" +
-					"用户和你之前已有过多轮对话（下方 messages 含历史 user/assistant 交替）。" +
-					"回答时延续上下文 —— 若用户说『那个』『它』『上面提到的』等指代，应解析到历史中的具体对象。"
+				sysPrompt += frag.History
 			}
-			sysPrompt += "\n\n## 输出\n" +
-				"用一段简洁中文文字回答（不要 JSON）。优先引用具体文件路径 + 行为，让读者能直接定位。"
+			sysPrompt += frag.Output
 			userPrompt := buildAgentUserPrompt(pr, text, pCtx)
 
 			// assemble messages: sys + history (alternating user/assistant) + the current user turn
@@ -317,4 +356,3 @@ func PostSteer(d Deps) gin.HandlerFunc {
 		})
 	}
 }
-

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
@@ -14,7 +15,7 @@ func TestSummaryStage_Run_WithMockProvider(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = "Hello world from mock"
 
-	stage := SummaryStage{}
+	stage := SummaryStage{Locale: i18n.ZH}
 	ctx := prctx.Context{
 		L1Meta:        "标题: fix bug\nbody: 修复空指针",
 		L3Conventions: "用 errors.Is 检查 sentinel",
@@ -54,7 +55,7 @@ func TestSummaryStage_Run_WithMockProvider(t *testing.T) {
 }
 
 func TestSummaryStage_Run_StreamError(t *testing.T) {
-	stage := SummaryStage{}
+	stage := SummaryStage{Locale: i18n.ZH}
 	ctx := prctx.Context{L1Meta: "test"}
 
 	// errProvider 直接返同步错误，模拟 Stream 失败（如鉴权）

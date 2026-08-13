@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
@@ -438,14 +439,16 @@ func buildPerStageContexts(
 
 // newStage builds the review.Stage matching name and injects that stage's model (an empty model means the provider default).
 // ok=false means the stage name is unknown. The steer rerun path reuses this same per-stage model routing.
+// Locale is hardcoded to i18n.ZH here to preserve today's all-Chinese behavior; per-request locale resolution
+// (body / Accept-Language / DEFAULT_LOCALE) is threaded in by a later task.
 func newStage(name, model string) (review.Stage, bool) {
 	switch name {
 	case "summary":
-		return review.SummaryStage{Model: model}, true
+		return review.SummaryStage{Model: model, Locale: i18n.ZH}, true
 	case "risks":
-		return review.RisksStage{Model: model}, true
+		return review.RisksStage{Model: model, Locale: i18n.ZH}, true
 	case "suggestions":
-		return review.SuggestionsStage{Model: model}, true
+		return review.SuggestionsStage{Model: model, Locale: i18n.ZH}, true
 	default:
 		return nil, false
 	}

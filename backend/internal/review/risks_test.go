@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
@@ -36,7 +37,7 @@ func TestRisksStage_Run_Success(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"risks":[{"file":"main.go","line":42,"severity":"high","category":"bug","confidence":0.95,"reason":"空指针解引用"},{"file":"util.go","severity":"low","category":"style","confidence":0.6,"reason":"命名不清"}]}`
 
-	ch, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestRisksStage_Run_EmptyRisks(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"risks":[]}`
 
-	ch, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestRisksStage_Run_MalformedJSON(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = "not json at all"
 
-	ch, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestRisksStage_Run_MalformedJSON(t *testing.T) {
 }
 
 func TestRisksStage_Run_StreamError(t *testing.T) {
-	_, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, errProvider{err: streamErr{msg: "stream failed"}})
+	_, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, errProvider{err: streamErr{msg: "stream failed"}})
 	if err == nil {
 		t.Fatal("期望同步 Stream 错误向上冒")
 	}

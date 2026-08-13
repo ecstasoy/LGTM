@@ -22,16 +22,23 @@ type Risk struct {
 	Reason     string  `json:"reason"`
 }
 
+// risksSystemByLocale carries the persona and the output-format instruction; the stage template carries the task.
+var risksSystemByLocale = map[i18n.Locale]string{
+	i18n.ZH: "你是一位 code reviewer，仅按要求输出严格 JSON。",
+	i18n.EN: "You are a code reviewer. Emit strict JSON exactly as specified, nothing else.",
+}
+
 // RisksStage 渲染 risks.<locale>.tmpl，强制 JSON 输出，解析后 emit 一次 risks_done。
 type RisksStage struct {
 	Model       string
 	Temperature float32
+	Locale      i18n.Locale // 输出语言；zero value 会导致模板 / system 串查不到，调用方必须显式传
 }
 
 func (RisksStage) Name() string { return "risks" }
 
 func (s RisksStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<-chan Event, error) {
-	tmpl, err := prompts.ParseFor("risks", i18n.ZH)
+	tmpl, err := prompts.ParseFor("risks", s.Locale)
 	if err != nil {
 		return nil, fmt.Errorf("risks: load template: %w", err)
 	}
@@ -41,7 +48,7 @@ func (s RisksStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<
 	}
 
 	chunks, err := p.Stream(ctx, llm.Request{
-		System:      "你是一位 code reviewer，仅按要求输出严格 JSON。",
+		System:      risksSystemByLocale[s.Locale],
 		User:        buf.String(),
 		Model:       s.Model,
 		Temperature: s.Temperature,
