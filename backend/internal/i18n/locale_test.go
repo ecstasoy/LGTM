@@ -18,6 +18,8 @@ func TestNormalize(t *testing.T) {
 		{"fr", i18n.ZH, i18n.ZH},
 		{"", i18n.ZH, i18n.ZH},
 		{"", i18n.EN, i18n.EN},
+		{"  zh  ", i18n.EN, i18n.ZH},              // TrimSpace test
+		{"  EN  ", i18n.ZH, i18n.EN},              // TrimSpace + case test
 	}
 	for _, c := range cases {
 		if got := i18n.Normalize(c.in, c.def); got != c.want {
@@ -38,6 +40,9 @@ func TestFromAcceptLanguage(t *testing.T) {
 		{"fr-FR,de;q=0.9", i18n.ZH},
 		{"", i18n.ZH},
 		{"en;q=abc,zh", i18n.ZH},
+		{"en;q=0.9;q=0.1,zh;q=0.5", i18n.EN}, // first q= wins (0.9 > 0.5)
+		{"*", i18n.ZH},                         // wildcard returns default
+		{"en,zh", i18n.EN},                     // equal weight (1.0), source order preserved
 	}
 	for _, c := range cases {
 		if got := i18n.FromAcceptLanguage(c.header, i18n.ZH); got != c.want {

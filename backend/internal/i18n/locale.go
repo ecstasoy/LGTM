@@ -46,6 +46,7 @@ func FromAcceptLanguage(header string, def Locale) Locale {
 			continue
 		}
 		weight := 1.0
+		// First q= parameter wins; subsequent q parameters are ignored (matching TypeScript behavior).
 		for _, p := range fields[1:] {
 			p = strings.TrimSpace(p)
 			if !strings.HasPrefix(p, "q=") {
@@ -57,6 +58,7 @@ func FromAcceptLanguage(header string, def Locale) Locale {
 			} else {
 				weight = 0
 			}
+			break // Only the first q= parameter is used.
 		}
 		tags = append(tags, weighted{tag: tag, weight: weight})
 	}

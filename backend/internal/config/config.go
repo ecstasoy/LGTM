@@ -65,7 +65,7 @@ type Config struct {
 
 	// DefaultLocale is the single fallback for review output language: the last tier of the API's
 	// body > Accept-Language > default chain, and the value used by the webhook path, which has no user request.
-	DefaultLocale string `env:"LGTM_DEFAULT_LOCALE" envDefault:"zh"`
+	DefaultLocale string `env:"DEFAULT_LOCALE" envDefault:"zh"`
 
 	// v3 RAG embedding provider：
 	//   - "mock" 默认 —— 确定性 hash 向量；CI / 无 key dev 跑通 pipeline
