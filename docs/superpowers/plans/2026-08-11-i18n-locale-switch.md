@@ -1369,6 +1369,12 @@ var systemByLocale = map[i18n.Locale]string{
 
 `Orchestrator` 加 `Locale i18n.Locale` 字段，构造各 stage 时传入。
 
+**计划修正（Task 17 执行时发现）：`internal/review/orchestrator.go` 的 `Orchestrator.Run` 是死代码**——恒返回 `"orchestrator run not implemented"`，全仓库没有任何构造点。给它加字段只是留个占位，不构成可执行接线。
+
+真实请求路径是：`api.PostReview` → `prctx.Builder.Build` → `api.buildPerStageContexts` → `api.mergeStages` → **`api.newStage`** → `forwardStage` → `Stage.Run` → `prompts.ParseFor(stage, s.Locale)`。Agent 自由问答走 `api.PostSteer` 的另一条分支，完全绕开 `newStage`。
+
+因此 **Task 19 要接的是 `internal/api/review.go` 的 `newStage` 和 `steer.go` 里 agent 分支的 locale 变量，不是 Orchestrator。** 这两处目前都硬编码 `i18n.ZH` 并留了标记。
+
 - [ ] **Step 4: 编译并跑测试**
 
 Run: `cd backend && go build ./... && go test ./...`
