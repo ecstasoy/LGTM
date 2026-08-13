@@ -235,13 +235,11 @@ export function AgentSessionView({
               // second writeSSE(..., "info", ...) call), now fully superseded by agent_reply above.
               // Dropped structurally by mode rather than by matching its text.
               if (mode === "agent") return;
-              // stage mode's own status line (e.g. "正在按引导重跑 X 阶段…") has no structured
-              // equivalent either, but it's plain text with nothing to parse — safe to forward as-is.
-              // code is forwarded too (currently always undefined on this path — steer.go's stage-mode
-              // info frame carries no code — but the caller resolves through friendlyError regardless).
+              // stage mode's own status line carries steer_rerunning_{risks,suggestions}; forwarded
+              // with its code so the caller resolves localized copy through friendlyError.
               onSteerInfo?.(message, code);
             },
-            onStageError: (_s, msg) => markError(msg),
+            onStageError: (_s, msg, code) => markError(friendlyError(msg, tRef.current, code)),
           },
           tRef,
           locale,

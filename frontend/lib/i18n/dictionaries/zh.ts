@@ -74,6 +74,7 @@ export const zh = {
     minutesAgo: (n: number) => `${n} 分钟前`,
     hoursAgo: (n: number) => `${n} 小时前`,
     daysAgo: (n: number) => `${n} 天前`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "zh-CN",
   },
   home: {
@@ -103,6 +104,7 @@ export const zh = {
     minutesAgo: (n: number) => `${n} 分钟前`,
     hoursAgo: (n: number) => `${n} 小时前`,
     daysAgo: (n: number) => `${n} 天前`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "zh-CN",
   },
   userMenu: {
@@ -295,7 +297,9 @@ export const zh = {
     // Keyed by backend/internal/api/errcode.go's stable string constants (+ middleware/ratelimit.go's
     // CodeRateLimited). `as Record<string, string>` is required: without it, `typeof zh` would lock this
     // key set into a literal union, and every future backend code would need a matching frontend PR just
-    // to keep `en.ts` compiling.
+    // to keep `en.ts` compiling. The cost is that this is the ONE namespace outside the `Dict` guard:
+    // adding a key here alone still compiles, and friendlyError then serves generic copy for it.
+    // byCode.test.ts pins the two key sets equal so the half-added case fails the suite instead.
     byCode: {
       not_logged_in: "请先登录",
       oauth_not_configured: "GitHub OAuth 未配置",
@@ -309,6 +313,10 @@ export const zh = {
       empty_pr: "该 PR 无可评审的文件改动",
       history_login_required: "请先登录后查看评审历史",
       not_review_owner: "只能删除你创建的评审",
+      agent_max_steps:
+        "Agent 用尽步数仍未给出答案。可能是工具反复访问本 PR 没改的文件。把问题问得更具体些（含文件名 / 函数名）再试。",
+      steer_rerunning_risks: "正在按引导重跑风险阶段…",
+      steer_rerunning_suggestions: "正在按引导重跑建议阶段…",
       rate_limited: "请求过于频繁，请稍后再试",
     } as Record<string, string>,
   },

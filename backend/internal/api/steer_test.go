@@ -10,7 +10,9 @@ import (
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
 	"github.com/ecstasoy/LGTM/backend/internal/i18n"
+	"github.com/ecstasoy/LGTM/backend/internal/index"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
@@ -261,5 +263,62 @@ func TestBuildAgentSystemPrompt_OptionalFragments(t *testing.T) {
 	withSearchZH := buildAgentSystemPrompt(i18n.ZH, true, false)
 	if !strings.Contains(withSearchZH, "search_repo") || strings.Contains(withSearchZH, "whole-repo RAG index") {
 		t.Errorf("ZH prompt with hasSearchRepo=true should mention search_repo in Chinese, not English, got %q", withSearchZH)
+	}
+}
+
+// relatedCodeHeadingByLocale is the heading each locale's system prompt tells the model to look for.
+// Hardcoded here rather than read from either map, so the test fails when the two drift apart.
+var relatedCodeHeadingByLocale = map[i18n.Locale]string{
+	i18n.ZH: "## 相关代码（跨文件 RAG 召回）",
+	i18n.EN: "## Related code (cross-file RAG retrieval)",
+}
+
+// TestBuildAgentUserPrompt_RelatedCodeHeadingMatchesSystemPrompt pins the coupling the EN prompt used to
+// break: the system prompt says "answer from the Related code section, don't call a tool", so the user
+// prompt has to emit that exact heading. Before this, buildAgentUserPrompt always emitted the Chinese one.
+func TestBuildAgentUserPrompt_RelatedCodeHeadingMatchesSystemPrompt(t *testing.T) {
+	pr := gh.PullRequest{Owner: "o", Repo: "r", Number: 7, Title: "fix race"}
+	pCtx := prctx.Context{
+		L1Meta:        "meta",
+		L3Conventions: "conventions",
+		L4References: []index.Reference{
+			{File: "other.go", Snippet: "func X() {}", Reason: "cosine=0.9", PRNumber: 76},
+		},
+	}
+	for locale, heading := range relatedCodeHeadingByLocale {
+		t.Run(string(locale), func(t *testing.T) {
+			sys := buildAgentSystemPrompt(locale, false, false)
+			if !strings.Contains(sys, heading) {
+				t.Fatalf("%s system prompt does not name %q:\n%s", locale, heading, sys)
+			}
+			user := buildAgentUserPrompt(pr, "why is this safe?", pCtx, locale)
+			if !strings.Contains(user, heading) {
+				t.Errorf("%s user prompt does not emit %q:\n%s", locale, heading, user)
+			}
+		})
+	}
+}
+
+// TestBuildAgentUserPrompt_NoCrossLocaleLeak checks the other headings switch too — an EN prompt whose
+// body is still "## PR 元信息" / "用户引导：" is the same defect one heading further down.
+func TestBuildAgentUserPrompt_NoCrossLocaleLeak(t *testing.T) {
+	pr := gh.PullRequest{Owner: "o", Repo: "r", Number: 7, Title: "fix race"}
+	pCtx := prctx.Context{L1Meta: "meta", L3Conventions: "conventions"}
+
+	en := buildAgentUserPrompt(pr, "q", pCtx, i18n.EN)
+	for _, zhOnly := range []string{"PR 元信息", "用户引导", "项目约定"} {
+		if strings.Contains(en, zhOnly) {
+			t.Errorf("EN user prompt still contains the Chinese heading %q:\n%s", zhOnly, en)
+		}
+	}
+	for _, want := range []string{"## PR metadata", "User steer: q", "## Project conventions"} {
+		if !strings.Contains(en, want) {
+			t.Errorf("EN user prompt missing %q:\n%s", want, en)
+		}
+	}
+
+	zh := buildAgentUserPrompt(pr, "q", pCtx, i18n.ZH)
+	if !strings.Contains(zh, "## PR 元信息") || strings.Contains(zh, "## PR metadata") {
+		t.Errorf("ZH user prompt should keep its Chinese headings:\n%s", zh)
 	}
 }

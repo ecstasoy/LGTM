@@ -78,6 +78,7 @@ export const en: Dict = {
     minutesAgo: (n: number) => `${n}m ago`,
     hoursAgo: (n: number) => `${n}h ago`,
     daysAgo: (n: number) => `${n}d ago`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "en-US",
   },
   home: {
@@ -108,6 +109,7 @@ export const en: Dict = {
     minutesAgo: (n: number) => `${n}m ago`,
     hoursAgo: (n: number) => `${n}h ago`,
     daysAgo: (n: number) => `${n}d ago`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "en-US",
   },
   userMenu: {
@@ -311,7 +313,8 @@ export const en: Dict = {
     notFoundBody: "The URL may be mistyped, or this review may have been deleted.",
     browseHistory: "Browse history",
     // Keep this key set identical to zh.ts's byCode — see the comment there for why the type
-    // annotation is required.
+    // annotation is required, and byCode.test.ts for the test that enforces the parity TypeScript
+    // can no longer check here.
     byCode: {
       not_logged_in: "Sign in first",
       oauth_not_configured: "GitHub OAuth is not configured",
@@ -325,6 +328,10 @@ export const en: Dict = {
       empty_pr: "This PR has no reviewable file changes",
       history_login_required: "Sign in to view review history",
       not_review_owner: "You can only delete reviews you created",
+      agent_max_steps:
+        "The agent ran out of steps without reaching an answer. It may be re-reading files this PR didn't change. Try asking more specifically — name a file or a function.",
+      steer_rerunning_risks: "Rerunning the risks stage with your steer…",
+      steer_rerunning_suggestions: "Rerunning the suggestions stage with your steer…",
       rate_limited: "Too many requests — please try again shortly",
     } as Record<string, string>,
   },

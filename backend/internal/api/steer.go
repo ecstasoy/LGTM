@@ -87,27 +87,64 @@ var allowedSteerStages = map[string]bool{
 	"suggestions": true,
 }
 
+// agentUserPromptByLocale carries the headings buildAgentUserPrompt emits, same per-locale map shape as
+// agentSystemByLocale above. RelatedCode must stay byte-identical to the heading agentSystemByLocale's
+// KeyHint quotes: that fragment tells the model to answer from that section instead of calling a tool,
+// and an English system prompt naming a heading the Chinese user prompt never emits leaves it nothing to
+// bind to. The "may come from an earlier PR" nuance the ZH heading used to carry lives in KeyHint and in
+// each reference's own FromPR origin line, so dropping it from the heading loses nothing.
+var agentUserPromptByLocale = map[i18n.Locale]struct {
+	PRLine      string
+	QueryLine   string
+	Meta        string
+	Conventions string
+	RelatedCode string
+	FromPR      string
+	Reference   string
+}{
+	i18n.ZH: {
+		PRLine:      "PR：%s/%s#%d（%s）\n\n",
+		QueryLine:   "用户引导：%s\n\n",
+		Meta:        "## PR 元信息\n",
+		Conventions: "\n\n## 项目约定\n",
+		RelatedCode: "\n\n## 相关代码（跨文件 RAG 召回）\n",
+		FromPR:      "来自 PR #%d · %s",
+		Reference:   "\n**%s**（%s）\n```\n%s\n```\n",
+	},
+	i18n.EN: {
+		PRLine:      "PR: %s/%s#%d (%s)\n\n",
+		QueryLine:   "User steer: %s\n\n",
+		Meta:        "## PR metadata\n",
+		Conventions: "\n\n## Project conventions\n",
+		RelatedCode: "\n\n## Related code (cross-file RAG retrieval)\n",
+		FromPR:      "from PR #%d · %s",
+		Reference:   "\n**%s** (%s)\n```\n%s\n```\n",
+	},
+}
+
 // buildAgentUserPrompt packs a prctx.Context into the agent's user prompt.
 // Key difference from the stage templates: no JSON output instruction, and the L4 RAG section is explicitly flagged as cross-PR context.
 // L2 is not inlined (patches are large) — the agent can call read_file on demand; this gives only L1Meta (including the file list) and L4 recall.
-func buildAgentUserPrompt(pr gh.PullRequest, userQuery string, pCtx prctx.Context) string {
+// Known gap: pCtx.L1Meta's own labels and each reference's Reason are still Chinese whatever the locale — they are built in internal/prctx.
+func buildAgentUserPrompt(pr gh.PullRequest, userQuery string, pCtx prctx.Context, locale i18n.Locale) string {
+	h := agentUserPromptByLocale[locale]
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "PR：%s/%s#%d（%s）\n\n", pr.Owner, pr.Repo, pr.Number, pr.Title)
-	fmt.Fprintf(&sb, "用户引导：%s\n\n", userQuery)
-	sb.WriteString("## PR 元信息\n")
+	fmt.Fprintf(&sb, h.PRLine, pr.Owner, pr.Repo, pr.Number, pr.Title)
+	fmt.Fprintf(&sb, h.QueryLine, userQuery)
+	sb.WriteString(h.Meta)
 	sb.WriteString(pCtx.L1Meta)
 	if pCtx.L3Conventions != "" {
-		sb.WriteString("\n\n## 项目约定\n")
+		sb.WriteString(h.Conventions)
 		sb.WriteString(pCtx.L3Conventions)
 	}
 	if len(pCtx.L4References) > 0 {
-		sb.WriteString("\n\n## 相关代码（跨文件 RAG 召回；可能来自本 PR 或之前评过的同 repo PR）\n")
+		sb.WriteString(h.RelatedCode)
 		for _, r := range pCtx.L4References {
 			origin := r.Reason
 			if r.PRNumber > 0 {
-				origin = fmt.Sprintf("来自 PR #%d · %s", r.PRNumber, r.Reason)
+				origin = fmt.Sprintf(h.FromPR, r.PRNumber, r.Reason)
 			}
-			fmt.Fprintf(&sb, "\n**%s**（%s）\n```\n%s\n```\n", r.File, origin, r.Snippet)
+			fmt.Fprintf(&sb, h.Reference, r.File, origin, r.Snippet)
 		}
 	}
 	return sb.String()
@@ -263,7 +300,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			// strong steer: L4 already has RAG context → answer from it directly rather than spinning on tool calls
 			// PR sandbox tools + optional search_repo (depending on whether a retriever was injected)
 			sysPrompt := buildAgentSystemPrompt(locale, hasSearchRepo, len(priorTurns) > 0)
-			userPrompt := buildAgentUserPrompt(pr, text, pCtx)
+			userPrompt := buildAgentUserPrompt(pr, text, pCtx, locale)
 
 			// assemble messages: sys + history (alternating user/assistant) + the current user turn
 			// history tool_calls / observations are left out; the agent will call the tools again if it needs them
@@ -282,16 +319,15 @@ func PostSteer(d Deps) gin.HandlerFunc {
 				// only push error when the agent produced no text at all; when there is Output the info frame below already conveys it
 				// shows the user something concrete instead of a non-answer like "agent: max steps reached"
 				if result.Output == "" {
-					hint := err.Error()
+					frame := map[string]string{"stage": "agent", "message": err.Error()}
 					if errors.Is(err, agent.ErrMaxStepsReached) {
-						hint = fmt.Sprintf("Agent 用尽 %d 步仍未给出答案。"+
+						// message stays as-is for curl; the frontend renders its own copy off code.
+						frame["message"] = fmt.Sprintf("Agent 用尽 %d 步仍未给出答案。"+
 							"可能是工具反复访问本 PR 没改的文件。"+
 							"试着把问题问得更具体（含文件名 / 函数名），或让我（agent）先看「相关代码」段。", result.Steps)
+						frame["code"] = CodeAgentMaxSteps
 					}
-					writeSSE(c.Writer, "error", map[string]string{
-						"stage":   "agent",
-						"message": hint,
-					})
+					writeSSE(c.Writer, "error", frame)
 				}
 			}
 			// push the agent's final output to the frontend (v1 simplification: no attempt to parse it into risks/suggestions JSON)
@@ -331,6 +367,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 		writeSSE(c.Writer, "info", map[string]string{
 			"message": fmt.Sprintf("正在按引导重跑 %s 阶段…", stageKey),
 			"stage":   stageKey,
+			"code":    steerRerunCodeByStage[stageKey],
 		})
 		c.Writer.Flush()
 

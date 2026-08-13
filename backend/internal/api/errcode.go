@@ -1,7 +1,9 @@
 package api
 
-// Stable machine-readable error codes. The frontend renders copy from its own dictionary keyed by these;
-// the human-readable "error" field stays as-is for curl and non-browser consumers.
+// Stable machine-readable codes. The frontend renders copy from its own dictionary keyed by these;
+// the human-readable "error" / "message" field stays as-is for curl and non-browser consumers.
+// Not all of them ride an error response: empty_pr and the steer_rerunning_* pair key SSE info frames.
+// Every constant here needs an entry in BOTH frontend dictionaries — see docs/API.md's i18n invariants.
 const (
 	CodeNotLoggedIn          = "not_logged_in"
 	CodeOAuthNotConfigured   = "oauth_not_configured"
@@ -15,4 +17,15 @@ const (
 	CodeEmptyPR              = "empty_pr"
 	CodeHistoryLoginRequired = "history_login_required"
 	CodeNotReviewOwner       = "not_review_owner"
+	CodeAgentMaxSteps        = "agent_max_steps"
+	// One code per rerunnable stage: byCode dictionary entries are plain strings with no interpolation,
+	// so the stage name has to live in the code rather than in a placeholder.
+	CodeSteerRerunningRisks       = "steer_rerunning_risks"
+	CodeSteerRerunningSuggestions = "steer_rerunning_suggestions"
 )
+
+// steerRerunCodeByStage keys the stage-rerun info frame; the stage has already passed allowedSteerStages.
+var steerRerunCodeByStage = map[string]string{
+	"risks":       CodeSteerRerunningRisks,
+	"suggestions": CodeSteerRerunningSuggestions,
+}

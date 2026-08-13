@@ -147,8 +147,9 @@ export function AgentPanel({ onClose, reviewId }: Props) {
           onAgentReply: (_steps, output) => {
             setMsgs((m) => [...m, { role: "assistant", text: output }]);
           },
-          onStageError: (_s, msg) => {
-            setMsgs((m) => [...m, { role: "assistant", text: `❌ ${msg}` }]);
+          onStageError: (_s, msg, code) => {
+            const resolved = friendlyError(msg, tRef.current, code);
+            setMsgs((m) => [...m, { role: "assistant", text: `❌ ${resolved}` }]);
           },
         },
         tRef,

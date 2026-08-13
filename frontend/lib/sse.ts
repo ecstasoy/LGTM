@@ -43,7 +43,9 @@ export interface StreamCallbacks {
   // review.go's empty_pr notice). Consumers should resolve display text through friendlyError(message,
   // t, code) rather than rendering `message` raw, so a coded info frame still localizes.
   onInfo?: (message: string, code?: string) => void;
-  onStageError?: (stage: string, message: string) => void;
+  // code (optional): same contract as onInfo's — resolve display text through friendlyError(message,
+  // t, code), never render `message` raw (e.g. steer.go's agent_max_steps hint).
+  onStageError?: (stage: string, message: string, code?: string) => void;
   onStageDone?: (stage: string) => void;
   onDone?: () => void;
   // review_id: sent by the backend once a streamed review has persisted; the frontend uses it to
@@ -273,8 +275,8 @@ function dispatch(ev: ParsedFrame, cb: StreamCallbacks): void {
       break;
     }
     case "error": {
-      const p = parsed as { stage?: string; message?: string };
-      cb.onStageError?.(p.stage ?? "?", p.message ?? "");
+      const p = parsed as { stage?: string; message?: string; code?: string };
+      cb.onStageError?.(p.stage ?? "?", p.message ?? "", p.code);
       break;
     }
     case "review_id": {

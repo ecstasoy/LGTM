@@ -34,7 +34,10 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-type StageErrors = Partial<Record<"context" | "summary" | "risks" | "suggestions", string>>;
+// Each stage failure keeps the frame's optional `code` next to the message so StageErrorBanner can
+// resolve localized copy instead of rendering the backend's raw — always-Chinese — text.
+type StageError = { message: string; code?: string };
+type StageErrors = Partial<Record<"context" | "summary" | "risks" | "suggestions", StageError>>;
 
 const VALID_VIEWS: ViewKey[] = ["report", "diff", "session"];
 
@@ -173,10 +176,10 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           !cancelled && setToolEvents((prev) => mergeToolDone(prev, call)),
         onInfo: (m, code) => !cancelled && setInfo({ message: m, code }),
         onAgentReply: (steps, output) => !cancelled && setAgentReply({ steps, output }),
-        onStageError: (stage, msg) => {
+        onStageError: (stage, msg, code) => {
           if (cancelled) return;
           if (stage === "summary") setSummaryDone(true);
-          setStageErrors((prev) => ({ ...prev, [stage]: msg }));
+          setStageErrors((prev) => ({ ...prev, [stage]: { message: msg, code } }));
         },
         onStageDone: (stage) => {
           if (cancelled || stage !== "summary") return;
@@ -408,10 +411,10 @@ function ReviewDetailPageContent({ id }: { id: string }) {
             {info ? <InfoBanner message={info.message} code={info.code} /> : null}
             {agentReply ? <AgentReplyBanner steps={agentReply.steps} output={agentReply.output} /> : null}
             {stageErrors.context ? (
-              <StageErrorBanner stage={t.review.stageContext} message={stageErrors.context} />
+              <StageErrorBanner stage={t.review.stageContext} error={stageErrors.context} />
             ) : null}
             {stageErrors.suggestions ? (
-              <StageErrorBanner stage={t.review.stageSuggestions} message={stageErrors.suggestions} />
+              <StageErrorBanner stage={t.review.stageSuggestions} error={stageErrors.suggestions} />
             ) : null}
             {view === "report" ? (
               <ReportContent
@@ -556,12 +559,12 @@ function ReportContent({
       ) : null}
       {dropped.length > 0 ? <DroppedFilesNotice files={dropped} /> : null}
       {stageErrors.summary ? (
-        <StageErrorBanner stage={t.review.stageSummary} message={stageErrors.summary} />
+        <StageErrorBanner stage={t.review.stageSummary} error={stageErrors.summary} />
       ) : (
         <SummaryCard summary={summary} streaming={streaming && !summaryDone} />
       )}
       {stageErrors.risks ? (
-        <StageErrorBanner stage={t.review.stageRisks} message={stageErrors.risks} />
+        <StageErrorBanner stage={t.review.stageRisks} error={stageErrors.risks} />
       ) : risks.length > 0 ? (
         <RisksList risks={risks} onPickRisk={onPickRisk} />
       ) : risksDone ? (
@@ -604,12 +607,12 @@ function DroppedFilesNotice({ files }: { files: string[] }) {
   );
 }
 
-function StageErrorBanner({ stage, message }: { stage: string; message: string }) {
+function StageErrorBanner({ stage, error }: { stage: string; error: StageError }) {
   const t = useT();
   return (
     <div className="rounded-md border border-high-bd bg-high-bg px-3 py-2 text-sm text-high">
       <span className="font-medium">{t.review.stageFailedPrefix(stage)}</span>
-      {message}
+      {friendlyError(error.message, t, error.code)}
     </div>
   );
 }
@@ -620,11 +623,10 @@ const infoProse =
   "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-surface [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-surface [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-text";
 
 // InfoBanner: status line (e.g. the empty_pr notice, or a steer stage-rerun status forwarded up
-// from AgentSessionView). Resolves through friendlyError so a coded frame (review.go's empty_pr,
-// CodeEmptyPR) renders localized copy instead of the backend's raw — always-Chinese — message;
-// code is undefined for frames that don't carry one (e.g. steer.go's stage-rerun status), in which
-// case friendlyError falls through to the raw text unchanged, same as before. No longer regex-sniffs
-// the text for an agent completion — see AgentReplyBanner below, fed by the agent_reply SSE frame.
+// from AgentSessionView). Resolves through friendlyError so a coded frame renders localized copy
+// instead of the backend's raw — always-Chinese — message; a frame with no code at all still falls
+// through to the raw text unchanged. No longer regex-sniffs the text for an agent completion — see
+// AgentReplyBanner below, fed by the agent_reply SSE frame.
 function InfoBanner({ message, code }: { message: string; code?: string }) {
   const t = useT();
   return (

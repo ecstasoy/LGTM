@@ -28,8 +28,10 @@ type Stage interface {
 type Orchestrator struct {
 	Provider llm.Provider
 	Builder  prctx.Builder
-	Locale   i18n.Locale // Passed to each default stage's Locale field; picks the system-prompt and template language.
-	Stages   []Stage     // 默认 [SummaryStage{Locale: o.Locale}, RisksStage{Locale: o.Locale}, SuggestionsStage{Locale: o.Locale}]
+	// NOT WIRED: Run below is unimplemented and has no construction sites, so neither field is ever read.
+	// The live path decides stage locale in api.newStage; look there, not here.
+	Locale i18n.Locale // Would be passed to each default stage's Locale field; picks the system-prompt and template language.
+	Stages []Stage     // 默认 [SummaryStage{Locale: o.Locale}, RisksStage{Locale: o.Locale}, SuggestionsStage{Locale: o.Locale}]
 }
 
 // Run 启动配置好的所有 stage，返回合并后的事件 channel。
