@@ -82,10 +82,13 @@ function ReviewDetailPageContent({ id }: { id: string }) {
 
   // 统一状态形状：cached 模式一次填齐，streaming 模式逐步填
   const [pr, setPr] = useState<PrMeta | null>(null);
-  // reviewLocale: the language this stored review was generated in (cached mode only — a streaming
-  // review is, by construction, generated in the locale just requested, so it can never disagree
-  // with the current UI locale within the same page load). undefined means "no cached detail yet" /
-  // "streaming" / "pre-i18n record with no locale on file" — all three read as unknown, never as "zh".
+  // reviewLocale: the language this review was actually generated in. In cached mode it's hydrated
+  // from the stored record. In streaming mode it's set to the locale that was in effect when the
+  // stream was kicked off (see the data-fetching effect's finally()) once that stream completes —
+  // left undefined while the stream is still running, so the notice can't fire mid-stream, and the
+  // user is free to toggle the UI locale afterward without reloading and still see it. undefined
+  // means "no result yet" / "streaming in progress" / "pre-i18n record with no locale on file" — all
+  // read as unknown, never as "zh".
   const [reviewLocale, setReviewLocale] = useState<"zh" | "en" | undefined>(undefined);
   const [summary, setSummary] = useState("");
   const [risks, setRisks] = useState<Risk[]>([]);
@@ -192,6 +195,9 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           if (!cancelled) {
             setStreaming(false);
             setLoaded(true);
+            // Locale actually used for this request, captured by closure at effect-run time (see
+            // the deps comment below) — not the possibly-since-toggled current `locale`.
+            setReviewLocale(locale);
           }
         });
     } else {
