@@ -48,6 +48,8 @@ primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg /
   OPENAI_BASE_URL = "https://api.deepseek.com"
   LLM_MODEL = "deepseek-chat"
   SQLITE_PATH = "/data/reviews.db"
+  # webhook auto-review has no user request to negotiate from, so this is the bot's review language
+  DEFAULT_LOCALE = "en"
   ENVIRONMENT = "production"
   # Fly 内部 6PN 反代 + Anycast 边缘；trust 之让 ClientIP 正确解析
   TRUSTED_PROXIES = "fly-global-services"
