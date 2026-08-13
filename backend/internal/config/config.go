@@ -63,6 +63,10 @@ type Config struct {
 	// 空字符串（默认）表示不信任任何代理，直接取 RemoteAddr。
 	TrustedProxies string `env:"TRUSTED_PROXIES" envDefault:""`
 
+	// DefaultLocale is the single fallback for review output language: the last tier of the API's
+	// body > Accept-Language > default chain, and the value used by the webhook path, which has no user request.
+	DefaultLocale string `env:"LGTM_DEFAULT_LOCALE" envDefault:"zh"`
+
 	// v3 RAG embedding provider：
 	//   - "mock" 默认 —— 确定性 hash 向量；CI / 无 key dev 跑通 pipeline
 	//   - "openai" —— 真 OpenAI 兼容 endpoint
