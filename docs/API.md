@@ -16,13 +16,15 @@ POST /api/review
 Content-Type: application/json
 
 {
-  "url": "https://github.com/owner/repo/pull/123"
+  "url": "https://github.com/owner/repo/pull/123",
+  "locale": "en"
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `url` | string | 是 | GitHub PR 链接；允许带 `/files` 后缀和末尾斜杠；前后空白自动 trim |
+| `locale` | string | 否 | 评审正文语言，`"zh"` / `"en"`。三级回退：请求体 → `Accept-Language` → `DEFAULT_LOCALE`；无法识别的值一律落回 `DEFAULT_LOCALE`，不报错。locale 是评审缓存唯一键的一部分，中英文各存一条 |
 
 ### 响应
 
@@ -50,7 +52,10 @@ data: <JSON>
 | `pr` | `{ id, owner, repo, pr, url, head_sha, title }` | 首帧，GitHub 拉取成功后立刻发，让前端先渲头部 |
 | `summary_delta` | `{ "delta": "增量文本" }` | summary 阶段一帧 markdown 输出，多帧拼接成完整 markdown |
 | `risks_done` | `[{ file, line?, severity, category, confidence, reason }]` | risks 阶段完成（要么有 risks 要么空数组） |
-| `error` | `{ "stage": "summary\|risks", "message": "..." }` | 某 stage 中途失败；不中止整条流 |
+| `suggestions_done` | `[{ file, line?, type, title, body, patch? }]` | suggestions 阶段完成 |
+| `info` | `{ "message": "...", "code"?: "...", "stage"?: "..." }` | 状态提示（如 PR 无可评审改动 `empty_pr`）；`code` 见下方「错误码」 |
+| `agent_reply` | `{ "steps": 3, "output": "markdown" }` | agent 模式的最终回答，结构化字段（不要去解析 `info` 的散文） |
+| `error` | `{ "stage": "summary\|risks", "message": "...", "code"?: "..." }` | 某 stage 中途失败；不中止整条流 |
 | `done` | `{}` | 所有 stage 完成，连接即将关闭 |
 
 **risks 项字段**：
@@ -65,6 +70,11 @@ data: <JSON>
 | `reason` | string | 中文说明，≤ 80 字 |
 
 ### 预检错误（不发 SSE）
+
+除下表的通用参数错误外，所有面向用户的错误响应都额外带一个稳定的 `code` 字段（如
+`{"error":"PR 不存在或为私有仓库","code":"pr_not_found"}`）。`error` 是中文散文，只服务 curl 与非浏览器
+消费者；浏览器端一律按 `code` 从前端字典取本地化文案。全部取值见
+`backend/internal/api/errcode.go`。
 
 | Status | 触发条件 | 响应体 |
 |---|---|---|
@@ -115,6 +125,71 @@ while (true) {
 ```
 
 完整封装见 `frontend/lib/sse.ts` 的 `streamReview`。
+
+---
+
+## POST /api/review/:id/steer
+
+对已完成的评审追加引导：重跑某个 stage，或跑 agent 深挖。同样是 SSE。
+
+```http
+POST /api/review/abc123/steer
+Content-Type: application/json
+
+{ "text": "重点看并发安全", "stage": "risks", "mode": "stage", "locale": "en" }
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `text` | string | 是 | 用户引导文本 |
+| `mode` | string | 否 | `"stage"`（默认，重跑 stage）/ `"agent"`（跑 ReAct 循环 + 工具调用） |
+| `stage` | string | `mode=stage` 时是 | `"risks"` / `"suggestions"`；`mode=agent` 忽略 |
+| `locale` | string | 否 | 同 `POST /api/review`，回退链一致 |
+
+事件类型复用上面那张表；`risks_done` / `suggestions_done` 在这里改名为 `steered_risks_done` /
+`steered_suggestions_done`，agent 模式额外发 `tool_call_start` / `tool_call_done` / `agent_reply`。
+
+---
+
+## GET /api/perms
+
+查当前用户对某仓库的权限，驱动前端「💬 评论 / ✅ 提交」按钮的可用态与禁用原因。
+
+```http
+GET /api/perms?owner=ecstasoy&repo=LGTM
+```
+
+```json
+{
+  "authenticated": true,
+  "permission": "read",
+  "can_comment": false,
+  "can_commit": false,
+  "reason": "对此仓库无评论权限（需 triage / write / admin）",
+  "reason_code": "no_comment_permission"
+}
+```
+
+`reason` 是中文散文，`reason_code` 是它的稳定机读对应物（同一套 `errcode.go` 取值），前端优先按
+`reason_code` 查字典。GitHub 权限查询失败那一支带的是上游动态报错，没有固定 code，此时 `reason_code`
+缺省，前端原样展示。
+
+---
+
+## i18n 契约（改后端错误 / SSE 文案前先读这四条）
+
+前端把所有 UI 文案集中在 `frontend/lib/i18n/dictionaries/{zh,en}.ts`，后端只发机读 code。这套分工靠下面
+四条规则维持，其中三条编译器查不出来：
+
+1. **`errcode.go` 每加一个常量，两本字典的 `errors.byCode` 都要加条目。** `byCode` 标了
+   `as Record<string, string>`，是唯一逃出 `Dict = typeof zh` 类型检查的命名空间——只加中文不会报错。
+   `frontend/lib/i18n/dictionaries/byCode.test.ts` 卡两边 key 集合相等；漏了会让测试红，而不是让用户看到中文。
+2. **凡是用户会读到的文本，一律过 `friendlyError(message, t, code)`，不要直接渲染后端字符串。** 后端散文
+   永远是中文；带了 code 但字典里没有时，`friendlyError` 退回通用文案，不会把中文漏到英文界面。
+3. **SSE 帧里的散文不是机读值。** 前端不许 `startsWith` / 正则去解析后端文案来判定状态——需要什么值就
+   在帧里加字段（`agent_reply` 的 `steps` / `output` 就是为此从 `info` 散文里拆出来的）。
+4. **`frontend/lib/i18n/locale.ts` 的 `negotiate()` 和 `backend/internal/i18n/locale.go` 的
+   `FromAcceptLanguage` 必须同步改。** 两边各自解析 `Accept-Language`，行为分叉会导致「英文界面 + 中文评审」。
 
 ---
 

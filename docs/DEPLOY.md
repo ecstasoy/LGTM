@@ -56,6 +56,19 @@ curl https://lgtm-backend.fly.dev/api/health/ready
 
 后端域名：`https://lgtm-backend.fly.dev`
 
+### 可选：默认语言
+
+`DEFAULT_LOCALE`（`zh` / `en`，默认 `zh`）是 locale 三级回退链的最后一级：请求体 `locale` 字段 →
+`Accept-Language` → `DEFAULT_LOCALE`。它同时是 webhook 自动评审唯一的语言来源——那条路径没有用户在场，
+前两级都无从谈起。非敏感，跟 `PORT` 一样放 `fly.toml` 的 `[env]` 即可：
+
+```toml
+[env]
+  DEFAULT_LOCALE = "zh"
+```
+
+前端不需要对应的环境变量：它按 cookie `lgtm-locale` 取，首次访问时由服务端读 `Accept-Language` 协商。
+
 ---
 
 ## 第 2 步：前端部署到 Vercel（约 5 分钟）
