@@ -38,7 +38,7 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s := CurrentSession(c)
 		if s == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录", "code": CodeNotLoggedIn})
 			return
 		}
 		if d.OAuthClient == nil {
@@ -90,7 +90,7 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 		}
 		sg := suggestions[idx]
 		if sg.File == "" || sg.Line <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 缺 file/line，无法定位到 PR diff"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 缺 file/line，无法定位到 PR diff", "code": CodeSuggestionNoAnchor})
 			return
 		}
 
@@ -103,6 +103,7 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 		if !perm.CanComment() {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":      "无评论权限（需 triage/write/admin）",
+				"code":       CodeNoCommentPermission,
 				"permission": string(perm),
 			})
 			return
@@ -132,7 +133,7 @@ func DeleteAdoptComment(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s := CurrentSession(c)
 		if s == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录", "code": CodeNotLoggedIn})
 			return
 		}
 		if d.OAuthClient == nil || d.Store == nil {

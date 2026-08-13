@@ -5,6 +5,7 @@ import (
 
 	"github.com/ecstasoy/LGTM/backend/internal/api/middleware"
 	"github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/memory"
@@ -41,6 +42,11 @@ type Deps struct {
 	// Models is the named model registry (L2); when non-nil it resolves (provider, model) per stage / per request.
 	// When nil it falls back to Provider (kept for older callers and unit tests).
 	Models *llm.Registry
+	// DefaultLocale is the last tier of the per-request locale chain (body > Accept-Language > this) and the
+	// value used outright by paths with no request to negotiate from (webhook). Expected to already be
+	// normalized (i18n.Normalize(cfg.DefaultLocale, i18n.ZH)); the zero value is treated as i18n.ZH by callers,
+	// so leaving it unset in older callers and unit tests is safe.
+	DefaultLocale i18n.Locale
 }
 
 // RegisterWithSecret is Register but takes the webhook secret explicitly

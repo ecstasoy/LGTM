@@ -31,7 +31,7 @@ func PostAdoptCommit(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s := CurrentSession(c)
 		if s == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录", "code": CodeNotLoggedIn})
 			return
 		}
 		if d.OAuthClient == nil {
@@ -82,11 +82,11 @@ func PostAdoptCommit(d Deps) gin.HandlerFunc {
 		}
 		sg := suggestions[idx]
 		if sg.File == "" || sg.Line <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 缺 file/line，无法定位到 PR diff"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 缺 file/line，无法定位到 PR diff", "code": CodeSuggestionNoAnchor})
 			return
 		}
 		if sg.Patch == nil || sg.Patch.After == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 无 patch.after，无法生成 GitHub suggestion 块（用「评论」按钮可发纯文字建议）"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 无 patch.after，无法生成 GitHub suggestion 块（用「评论」按钮可发纯文字建议）", "code": CodeSuggestionNoPatch})
 			return
 		}
 
@@ -99,6 +99,7 @@ func PostAdoptCommit(d Deps) gin.HandlerFunc {
 		if !perm.CanCommit() {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":      "无 push 权限（需 write/admin）",
+				"code":       CodeNoPushPermission,
 				"permission": string(perm),
 			})
 			return

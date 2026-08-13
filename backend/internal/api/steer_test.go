@@ -124,10 +124,10 @@ func TestSteer_Suggestions_EmitsSteeredSuggestionsDone(t *testing.T) {
 // TestBuildAgentSystemPrompt_BaseByLocale pins the exact assembled prompt (no optional fragments) for each
 // locale, independent of agentSystemByLocale itself (expected strings are hardcoded here, not looked up from the
 // map), so a typo'd or removed map entry fails this test instead of compiling away silently.
-// PostSteer's mode=agent path currently hardcodes locale to i18n.ZH (Deps carries no locale field yet — see the
-// TODO in PostSteer), so this exercises buildAgentSystemPrompt directly rather than the full HTTP handler; going
-// through PostSteer cannot reach the EN branch without either faking a Deps locale field that does not exist yet
-// or monkey-patching production code, neither of which belongs in this task.
+// This exercises buildAgentSystemPrompt directly rather than the full HTTP handler: PostSteer's mode=agent path
+// now resolves locale from the request (resolveLocale), but driving it to the EN branch through the full handler
+// would mean asserting on Accept-Language / body wiring that TestResolveLocalePrefersBodyThenHeaderThenDefault
+// already covers directly — this test's job is only to pin the prompt text per locale.
 func TestBuildAgentSystemPrompt_BaseByLocale(t *testing.T) {
 	wantZH := "你是 code reviewer agent。回答 PR 相关问题。\n\n" +
 		"## 关键：先看「相关代码」段\n" +

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
@@ -34,7 +35,7 @@ func TestMergeStages_RoutesPerStageModels(t *testing.T) {
 	ctxByStage := map[string]prctx.Context{"summary": base, "risks": base, "suggestions": base}
 	stageModels := map[string]string{"summary": "m-sum", "risks": "m-risk", "suggestions": "m-sug"}
 
-	for range mergeStages(context.Background(), ctxByStage, p, nil, stageModels) {
+	for range mergeStages(context.Background(), ctxByStage, p, nil, stageModels, i18n.ZH) {
 		// drain
 	}
 

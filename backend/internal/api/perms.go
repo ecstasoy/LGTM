@@ -26,6 +26,9 @@ type PermsResponse struct {
 	CanCommit bool `json:"can_commit"`
 	// Reason is why it is disabled; shown in the frontend tooltip
 	Reason string `json:"reason,omitempty"`
+	// ReasonCode is Reason's stable machine-readable counterpart (see errcode.go); empty when Reason carries a
+	// dynamic upstream message (e.g. a GitHub API failure) that has no fixed code to key a translation off of.
+	ReasonCode string `json:"reason_code,omitempty"`
 }
 
 // GetPerms GET /api/perms?owner=<>&repo=<>
@@ -44,6 +47,7 @@ func GetPerms(oa *oauth.Client) gin.HandlerFunc {
 			c.JSON(http.StatusOK, PermsResponse{
 				Authenticated: false,
 				Reason:        "未登录；登录后可见可执行权限",
+				ReasonCode:    CodeNotLoggedIn,
 			})
 			return
 		}
@@ -75,8 +79,10 @@ func GetPerms(oa *oauth.Client) gin.HandlerFunc {
 		switch {
 		case !resp.CanComment:
 			resp.Reason = "对此仓库无评论权限（需 triage / write / admin）"
+			resp.ReasonCode = CodeNoCommentPermission
 		case !resp.CanCommit:
 			resp.Reason = "对此仓库无 push 权限（需 write / admin）"
+			resp.ReasonCode = CodeNoPushPermission
 		}
 		c.JSON(http.StatusOK, resp)
 	}

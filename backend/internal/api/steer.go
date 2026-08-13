@@ -130,14 +130,16 @@ func PostSteer(d Deps) gin.HandlerFunc {
 
 		id := c.Param("id")
 		var body struct {
-			Text  string `json:"text"`
-			Stage string `json:"stage"`
-			Mode  string `json:"mode"` // "stage" (default, reruns risks/suggestions) / "agent" (runs the ReAct loop + tool calls)
+			Text   string `json:"text"`
+			Stage  string `json:"stage"`
+			Mode   string `json:"mode"`   // "stage" (default, reruns risks/suggestions) / "agent" (runs the ReAct loop + tool calls)
+			Locale string `json:"locale"` // review output language; body > Accept-Language > DEFAULT_LOCALE, see resolveLocale
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
+		locale := resolveLocale(c, body.Locale, effectiveDefaultLocale(d))
 		text := strings.TrimSpace(body.Text)
 		if text == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "text is required"})
@@ -260,8 +262,6 @@ func PostSteer(d Deps) gin.HandlerFunc {
 
 			// strong steer: L4 already has RAG context → answer from it directly rather than spinning on tool calls
 			// PR sandbox tools + optional search_repo (depending on whether a retriever was injected)
-			// TODO(next i18n task): resolve locale from the request instead of hardcoding ZH; Deps carries no locale yet.
-			locale := i18n.ZH
 			sysPrompt := buildAgentSystemPrompt(locale, hasSearchRepo, len(priorTurns) > 0)
 			userPrompt := buildAgentUserPrompt(pr, text, pCtx)
 
@@ -294,8 +294,17 @@ func PostSteer(d Deps) gin.HandlerFunc {
 					})
 				}
 			}
-			// push the agent's final output to the frontend as an info frame (v1 simplification: no attempt to parse it into risks/suggestions JSON)
+			// push the agent's final output to the frontend (v1 simplification: no attempt to parse it into risks/suggestions JSON)
 			if result.Output != "" {
+				// New structured frame: steps/output as separate fields, no baked-in language.
+				writeSSE(c.Writer, "agent_reply", map[string]any{
+					"steps":  result.Steps,
+					"output": result.Output,
+				})
+				// Legacy frame, kept verbatim (including its Chinese prose) alongside the new one: the frontend's
+				// InfoBanner still regex-parses this exact string to render the "Agent reply" heading + Markdown.
+				// Translating or dropping it here would silently break that path; Task 21 removes it once the
+				// frontend switches to consuming agent_reply.
 				writeSSE(c.Writer, "info", map[string]string{
 					"message": fmt.Sprintf("Agent 完成（%d 步）：%s", result.Steps, result.Output),
 					"stage":   "agent",
@@ -327,7 +336,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 
 		// resolve (provider, model) per stage through the registry (same routing as mergeStages); stageKey has already passed the allowlist check
 		prov, model := resolveProvider(d.Provider, d.Models, d.StageModels[stageKey])
-		stage, _ := newStage(stageKey, model)
+		stage, _ := newStage(stageKey, model, locale)
 		events, err := stage.Run(ctx, pCtx, prov)
 		if err != nil {
 			writeSSE(c.Writer, "error", map[string]string{

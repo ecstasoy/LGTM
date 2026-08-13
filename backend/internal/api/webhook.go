@@ -16,7 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
-	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/oauth"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/review"
@@ -359,10 +358,13 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		return
 	}
 
+	// webhook has no user request to negotiate a locale from; it always uses the deployment-configured default
+	// (already normalized to "zh"/"en" at startup — see Deps.DefaultLocale / effectiveDefaultLocale).
+	locale := effectiveDefaultLocale(d)
+
 	// idempotency check: an existing review for the same (owner, repo, pr, head_sha, locale) → skip
-	// TODO(i18n): pass the webhook-configured locale once it exists; until then every review is zh
 	if d.Store != nil {
-		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(i18n.ZH)); rec != nil {
+		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(locale)); rec != nil {
 			slog.Info("webhook: cache hit, skipping re-review", "review_id", rec.ID)
 			for _, login := range uniqueRecipients(args.SenderLogin, args.PRAuthorLogin) {
 				PushNotification(ctx, d.Cache, login, Notification{
@@ -393,7 +395,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	budget := toBudgetPayload(pCtx.BudgetReport)
 
 	ctxByStage := buildPerStageContexts(ctx, builder, pr, pCtx)
-	merged := mergeStages(ctx, ctxByStage, d.Provider, d.Models, d.StageModels)
+	merged := mergeStages(ctx, ctxByStage, d.Provider, d.Models, d.StageModels, locale)
 
 	var (
 		summaryBuf      strings.Builder
@@ -426,7 +428,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	if d.Store != nil {
 		// a webhook-created review is owned by the PR author (there is no login context, so ownership follows PR meta)
 		// that way the PR author sees and can delete their own repo's automatic reviews once logged in to lgtm.com
-		reviewID = persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "webhook", args.PRAuthorLogin)
+		reviewID = persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "webhook", args.PRAuthorLogin, string(locale))
 	}
 
 	// push the bot review back to the PR (using the installation token)

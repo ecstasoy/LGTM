@@ -16,6 +16,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/api"
 	"github.com/ecstasoy/LGTM/backend/internal/config"
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/memory"
@@ -118,6 +119,8 @@ func buildDeps(cfg config.Config) api.Deps {
 			"risks":       cfg.RisksModel,
 			"suggestions": cfg.SuggestionsModel,
 		},
+		// DefaultLocale: normalized once at startup so only "zh"/"en" ever reach the request-boundary resolver.
+		DefaultLocale: i18n.Normalize(cfg.DefaultLocale, i18n.ZH),
 	}
 	if cfg.SummaryModel != "" || cfg.RisksModel != "" || cfg.SuggestionsModel != "" {
 		slog.Info("per-stage model routing",
