@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/store"
@@ -341,7 +342,7 @@ func TestPostReview_CacheMiss_PersistsResult(t *testing.T) {
 		t.Error("cache miss 应跑 stage，调用 Provider")
 	}
 
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}
@@ -453,7 +454,7 @@ func TestPostReview_StageError_SkipsCache(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
 	}
 
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}
@@ -663,7 +664,7 @@ func TestPostReview_CacheMiss_PersistsAllMetaFields(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
 	}
 
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}
@@ -710,7 +711,7 @@ func TestPostReview_CacheMiss_PersistsFiles(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
 	}
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}
@@ -723,5 +724,95 @@ func TestPostReview_CacheMiss_PersistsFiles(t *testing.T) {
 	}
 	if len(p.Files) != 1 || p.Files[0].Path != "scanner.go" || p.Files[0].Patch == "" {
 		t.Errorf("Files 未持久化或字段缺失: %+v", p.Files)
+	}
+}
+
+// TestResolveLocalePrefersBodyThenHeaderThenDefault covers the three-tier fallback: body > Accept-Language > default.
+// An unrecognized value at any tier falls through to the next rather than erroring.
+func TestResolveLocalePrefersBodyThenHeaderThenDefault(t *testing.T) {
+	cases := []struct {
+		name       string
+		bodyLocale string
+		header     string
+		def        i18n.Locale
+		want       i18n.Locale
+	}{
+		{"body wins over header", "en", "zh-CN,zh;q=0.9", i18n.ZH, i18n.EN},
+		{"header used when body empty", "", "en-US,en;q=0.9", i18n.ZH, i18n.EN},
+		{"default used when both empty", "", "", i18n.ZH, i18n.ZH},
+		{"unknown body value falls through to header", "fr", "en-US", i18n.ZH, i18n.EN},
+		{"unknown body and header fall to default", "fr", "de-DE", i18n.EN, i18n.EN},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/reviews", nil)
+			if c.header != "" {
+				req.Header.Set("Accept-Language", c.header)
+			}
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = req
+
+			if got := resolveLocale(ctx, c.bodyLocale, c.def); got != c.want {
+				t.Errorf("resolveLocale = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestPostReview_GarbageLocale_PersistsWithinDomain is the security-load-bearing test: locale is the first
+// attacker-controlled component of the cache key (owner/repo/pr/head_sha all come from GitHub, and this endpoint
+// has no login gate). store.normalizeLocale only maps "" to "zh" and writes anything else verbatim, so if a raw
+// request-body value ever reached Put, every distinct garbage string would be a guaranteed cache miss — an
+// unbounded row/index growth vector. resolveLocale must normalize first, so only "zh"/"en"/the configured
+// default can ever reach the store. This test sends a garbage locale and asserts the persisted Record.Locale
+// is still confined to {zh, en}.
+func TestPostReview_GarbageLocale_PersistsWithinDomain(t *testing.T) {
+	s := newTestStore(t)
+	srv := startTestServer(t, Deps{
+		Fetcher: fakeFetcher{pr: samplePR()},
+		Provider: dualMockProvider{
+			textReply: "summary text",
+			jsonReply: `{"risks":[],"suggestions":[]}`,
+		},
+		Store: s,
+	})
+
+	res, body := postJSON(t, srv, "/api/review", map[string]string{
+		"url":    "https://github.com/golang/go/pull/42",
+		"locale": "en-x-1", // garbage: not "zh"/"en", crafted to look distinct per request
+	})
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+
+	// resolveLocale falls through an unrecognized body value to Accept-Language (absent here) and then to the
+	// configured default (unset in this Deps, so effectiveDefaultLocale falls back to i18n.ZH) — so this garbage
+	// value must land on "zh", not on some new "en-x-1" cache slot.
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", string(i18n.ZH))
+	if err != nil {
+		t.Fatalf("store.Get: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("garbage locale should still normalize to zh and be found under it")
+	}
+	if rec.Locale != string(i18n.ZH) && rec.Locale != string(i18n.EN) {
+		t.Fatalf("persisted Record.Locale = %q, want it confined to {zh, en}", rec.Locale)
+	}
+
+	// A second request with a different garbage string must collapse onto the same normalized cache slot
+	// rather than minting a new row: that is the actual unbounded-growth defense being tested here.
+	res2, body2 := postJSON(t, srv, "/api/review", map[string]string{
+		"url":    "https://github.com/golang/go/pull/42",
+		"locale": "en-x-2",
+	})
+	if res2.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res2.StatusCode, body2)
+	}
+	records, err := s.List(context.Background(), nil, 100)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("two garbage locale strings should share one cache row, got %d records", len(records))
 	}
 }

@@ -15,7 +15,7 @@
 - locale 值域固定为 `"zh" | "en"`；无法识别的输入一律落到默认值，不报错
 - 统一用 **locale** 命名 i18n 概念。**禁止**用 `lang`——`backend/internal/api/lang.go` 已占用该词表示 PR 的编程语言
 - cookie 名：`lgtm-locale`，`path=/`，`max-age=31536000`，`samesite=lax`，非 httpOnly
-- 后端默认 locale 配置项：`LGTM_DEFAULT_LOCALE`，默认 `"zh"`
+- 后端默认 locale 配置项：`DEFAULT_LOCALE`，默认 `"zh"`
 - 代码注释、commit message、PR 正文一律英文；一条注释默认一行陈述句
 - 前端字典唯一真源是 `lib/i18n/dictionaries/zh.ts`；`en.ts` 声明为 `Dict = typeof zh`，漏翻即编译错误
 - 不新增运行时 i18n 依赖（不引 next-intl / i18next）
@@ -1241,14 +1241,14 @@ Expected: PASS
 ```go
 	// DefaultLocale is the single fallback for review output language: the last tier of the API's
 	// body > Accept-Language > default chain, and the value used by the webhook path, which has no user request.
-	DefaultLocale string `env:"LGTM_DEFAULT_LOCALE" envDefault:"zh"`
+	DefaultLocale string `env:"DEFAULT_LOCALE" envDefault:"zh"`
 ```
 
 - [ ] **Step 6: 提交**
 
 ```bash
 git add backend/internal/i18n backend/internal/config/config.go
-git commit -m "feat(i18n): add backend locale primitives and LGTM_DEFAULT_LOCALE"
+git commit -m "feat(i18n): add backend locale primitives and DEFAULT_LOCALE"
 ```
 
 ---
@@ -1368,6 +1368,12 @@ var systemByLocale = map[i18n.Locale]string{
 - [ ] **Step 3: Orchestrator 透传 locale**
 
 `Orchestrator` 加 `Locale i18n.Locale` 字段，构造各 stage 时传入。
+
+**计划修正（Task 17 执行时发现）：`internal/review/orchestrator.go` 的 `Orchestrator.Run` 是死代码**——恒返回 `"orchestrator run not implemented"`，全仓库没有任何构造点。给它加字段只是留个占位，不构成可执行接线。
+
+真实请求路径是：`api.PostReview` → `prctx.Builder.Build` → `api.buildPerStageContexts` → `api.mergeStages` → **`api.newStage`** → `forwardStage` → `Stage.Run` → `prompts.ParseFor(stage, s.Locale)`。Agent 自由问答走 `api.PostSteer` 的另一条分支，完全绕开 `newStage`。
+
+因此 **Task 19 要接的是 `internal/api/review.go` 的 `newStage` 和 `steer.go` 里 agent 分支的 locale 变量，不是 Orchestrator。** 这两处目前都硬编码 `i18n.ZH` 并留了标记。
 
 - [ ] **Step 4: 编译并跑测试**
 
@@ -1677,6 +1683,14 @@ func resolveLocale(c *gin.Context, bodyLocale string, def i18n.Locale) i18n.Loca
 ```
 
 `i18n.Normalize` 传空 def 表示"没认出来",由调用方继续往下走。
+
+**安全要求（计划修订，Task 18 执行时发现）：locale 必须在请求边界归一化，不能把原始值透传下去。**
+
+`store.normalizeLocale` 只把 `""` 映射成 `"zh"`，其余原样落库——store 不做值域校验。而 `locale` 会是**第一个由攻击者控制的缓存键分量**（`owner`/`repo`/`pr`/`head_sha` 全部来自 GitHub）。评审时钉住的事实：`POST /api/reviews` 无登录门槛，限流是每 IP 5 次 / 25 秒且 cache 故障时 fail-open，所以 `{"locale":"en-x-1"}`、`en-x-2`…… 每个不同字符串都是必然 cache miss。
+
+注意评审对严重性的修正：**这不会新增 LLM 开销面**——今天指定任意非默认模型就已经能绕过缓存，且那条路径 `useCache=false` 连 `persistReview` 都跳过。locale 真正新增的是**无上界的行与索引增长**，因为它会落库。
+
+所以 `resolveLocale` 的返回值必须已经归一化过（`i18n.Normalize` 只会吐出 `zh` / `en` / 默认值），并且要有一个测试直接钉住这条：给请求体塞一个垃圾 locale，断言落库的 `Record.Locale` 仍在 `{zh, en}` 内。
 
 - [ ] **Step 4: 请求体加 locale 字段并接线**
 
@@ -2059,7 +2073,7 @@ gh pr edit --base main
 | prompt 双文件分语言 | Task 16 |
 | 四处 System 串 | Task 17 |
 | locale 三级回退 | Task 19 |
-| `LGTM_DEFAULT_LOCALE` | Task 15、19 |
+| `DEFAULT_LOCALE` | Task 15、19 |
 | webhook 用默认 locale | Task 19 |
 | 错误响应加 code、前端查字典 | Task 19、21 |
 | `Result.locale` 回流 + 提示条 | Task 22 |

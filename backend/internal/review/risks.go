@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/prompts"
@@ -16,21 +17,28 @@ type Risk struct {
 	File       string  `json:"file"`
 	Line       int     `json:"line,omitempty"`
 	Severity   string  `json:"severity"`   // high | medium | low
-	Category   string  `json:"category"`   // bug | security | perf | style | concurrency | other
+	Category   string  `json:"category"`   // bug | security | perf | style | concurrency | breaking | other
 	Confidence float32 `json:"confidence"` // 0.0-1.0，前端按 ≥ 0.9 默认展开
 	Reason     string  `json:"reason"`
 }
 
-// RisksStage 渲染 risks.tmpl，强制 JSON 输出，解析后 emit 一次 risks_done。
+// risksSystemByLocale carries the persona and the output-format instruction; the stage template carries the task.
+var risksSystemByLocale = map[i18n.Locale]string{
+	i18n.ZH: "你是一位 code reviewer，仅按要求输出严格 JSON。",
+	i18n.EN: "You are a code reviewer. Emit strict JSON exactly as specified, nothing else.",
+}
+
+// RisksStage 渲染 risks.<locale>.tmpl，强制 JSON 输出，解析后 emit 一次 risks_done。
 type RisksStage struct {
 	Model       string
 	Temperature float32
+	Locale      i18n.Locale // Output language; a zero value fails template/system lookup, so callers must set it explicitly.
 }
 
 func (RisksStage) Name() string { return "risks" }
 
 func (s RisksStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<-chan Event, error) {
-	tmpl, err := prompts.Parse("risks.tmpl")
+	tmpl, err := prompts.ParseFor("risks", s.Locale)
 	if err != nil {
 		return nil, fmt.Errorf("risks: load template: %w", err)
 	}
@@ -40,7 +48,7 @@ func (s RisksStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<
 	}
 
 	chunks, err := p.Stream(ctx, llm.Request{
-		System:      "你是一位 code reviewer，仅按要求输出严格 JSON。",
+		System:      risksSystemByLocale[s.Locale],
 		User:        buf.String(),
 		Model:       s.Model,
 		Temperature: s.Temperature,

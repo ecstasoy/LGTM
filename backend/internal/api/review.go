@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
@@ -89,6 +90,28 @@ func indexPRChunks(ctx context.Context, idx index.Indexer, pr gh.PullRequest) {
 	slog.Info("indexed PR chunks", "scope", scope, "files", len(pr.Files), "chunks", len(chunks))
 }
 
+// effectiveDefaultLocale returns d.DefaultLocale normalized, falling back to i18n.ZH when it is unset or
+// unrecognized. Deps.DefaultLocale is normalized once at startup (main.go), so this re-normalization is
+// belt-and-suspenders: Deps is exported and i18n.Locale is a bare string type with no constructor gate, so a
+// future or alternate construction site could set it to something outside {"zh", "en"} without the compiler
+// noticing. Left unguarded, that value would flow straight into the cache key (same class of bug resolveLocale
+// exists to prevent at the request boundary).
+func effectiveDefaultLocale(d Deps) i18n.Locale {
+	return i18n.Normalize(string(d.DefaultLocale), i18n.ZH)
+}
+
+// resolveLocale walks the request body > Accept-Language > configured default chain.
+// An unrecognized value at any tier falls through to the next rather than erroring.
+// The return value is always i18n.Normalize'd (or FromAcceptLanguage'd), so only "zh", "en", or def can
+// ever escape this function — this matters because locale becomes a cache-key dimension in store.Put,
+// and the store does not itself validate the value domain (see store.normalizeLocale).
+func resolveLocale(c *gin.Context, bodyLocale string, def i18n.Locale) i18n.Locale {
+	if l := i18n.Normalize(bodyLocale, ""); l != "" {
+		return l
+	}
+	return i18n.FromAcceptLanguage(c.GetHeader("Accept-Language"), def)
+}
+
 // PostReview takes { url }, reporting precondition errors as JSON first;
 // once past those it switches to text/event-stream and pushes one frame per stage event.
 func PostReview(d Deps) gin.HandlerFunc {
@@ -107,6 +130,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 			Model string `json:"model"` // L3: registry key applied to every stage; empty = default model
 			// StageModels overrides per stage (summary/risks/suggestions) and outranks Model; a missing stage falls back to Model, then to the deployment default
 			StageModels map[string]string `json:"stage_models"`
+			Locale      string            `json:"locale"` // review output language; body > Accept-Language > DEFAULT_LOCALE, see resolveLocale
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(400, gin.H{"error": "invalid request body"})
@@ -117,6 +141,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "url is required"})
 			return
 		}
+		locale := resolveLocale(c, body.Locale, effectiveDefaultLocale(d))
 
 		// L3 runtime model choice: each stage resolves stage_models[st] > model (applied to every stage) > deployment-side L1 default.
 		// every user-supplied key must be on the allowlist (cost / safety gate); any non-default model bypasses the cache
@@ -134,7 +159,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 				continue
 			}
 			if d.Models != nil && !d.Models.Has(picked) {
-				c.JSON(400, gin.H{"error": "未知模型"})
+				c.JSON(400, gin.H{"error": "未知模型", "code": CodeUnknownModel})
 				return
 			}
 			stageModels[st] = picked
@@ -151,9 +176,9 @@ func PostReview(d Deps) gin.HandlerFunc {
 			case errors.Is(err, gh.ErrInvalidPRURL):
 				c.JSON(400, gin.H{"error": err.Error()})
 			case errors.Is(err, gh.ErrPRNotFound):
-				c.JSON(404, gin.H{"error": "PR 不存在或为私有仓库（请配置 GITHUB_TOKEN）"})
+				c.JSON(404, gin.H{"error": "PR 不存在或为私有仓库（请配置 GITHUB_TOKEN）", "code": CodePRNotFound})
 			case errors.Is(err, gh.ErrAccessDenied):
-				c.JSON(403, gin.H{"error": "GitHub 拒绝访问（速率限制或权限不足）"})
+				c.JSON(403, gin.H{"error": "GitHub 拒绝访问（速率限制或权限不足）", "code": CodeGitHubForbidden})
 			default:
 				slog.Error("fetch PR", "err", err, "url", url)
 				c.JSON(502, gin.H{"error": "fetch upstream failed", "detail": err.Error()})
@@ -173,7 +198,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 
 		// empty PR short-circuit: with no reviewable file changes, skip the LLM and send info + done directly
 		if len(pr.Files) == 0 {
-			writeSSE(c.Writer, "info", map[string]string{"message": "该 PR 无可评审的文件改动"})
+			writeSSE(c.Writer, "info", map[string]string{"message": "该 PR 无可评审的文件改动", "code": CodeEmptyPR})
 			writeSSE(c.Writer, "done", map[string]any{})
 			c.Writer.Flush()
 			return
@@ -183,10 +208,10 @@ func PostReview(d Deps) gin.HandlerFunc {
 		writeSSE(c.Writer, "files", pr.Files)
 		c.Writer.Flush()
 
-		// cache hit: a complete result for the same (owner, repo, pr, head_sha) is replayed as-is, skipping the LLM
+		// cache hit: a complete result for the same (owner, repo, pr, head_sha, locale) is replayed as-is, skipping the LLM
 		// a non-default model sets useCache=false → skip the replay and force a rerun on the chosen model
 		if useCache && d.Store != nil {
-			if rec, gerr := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA); gerr != nil {
+			if rec, gerr := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(locale)); gerr != nil {
 				slog.Warn("cache get failed; falling through to stages", "err", gerr)
 			} else if rec != nil {
 				var p cachedPayload
@@ -228,7 +253,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 		// per-stage RAG query: risks/suggestions recompute L4 with their own query, summary reuses baseCtx
 		// two extra retrieve calls buy more on-topic recall; the cost to first byte is < 200ms
 		ctxByStage := buildPerStageContexts(ctx, builder, pr, pCtx)
-		merged := mergeStages(ctx, ctxByStage, d.Provider, d.Models, stageModels)
+		merged := mergeStages(ctx, ctxByStage, d.Provider, d.Models, stageModels, locale)
 
 		// collect while streaming so the result can be cached afterwards; any stage error skips the cache write (never cache a half-finished result)
 		var (
@@ -244,7 +269,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 			case ev, ok := <-merged:
 				if !ok {
 					if useCache && d.Store != nil && !stageErrObserved && risksData != nil && suggestionsData != nil {
-						if id := persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "manual", creatorLogin); id != "" {
+						if id := persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "manual", creatorLogin, string(locale)); id != "" {
 							// lets the streaming page enable the 💬 comment / ✅ commit / SteerComposer follow-up buttons once it has the ULID
 							// (without this frame the frontend can only wait for the user to go back and click the list entry)
 							raw, _ := json.Marshal(map[string]string{"id": id})
@@ -331,7 +356,9 @@ func prMetaPayload(pr gh.PullRequest, sourceURL string) map[string]any {
 // source marks what triggered the review: "manual" (user pasted a URL) / "webhook" (GitHub pushed a PR and it was auto-reviewed)
 // createdByLogin is the GitHub login (manual = the logged-in user, or "" when anonymous; webhook = the PR author, always non-empty)
 // anonymous records (UserID=nil) stay reachable by ID URL and still hit the cache, but are hidden from ListReviews so they do not pollute history
-func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, suggestions json.RawMessage, budget *budgetReportPayload, source string, createdByLogin string) string {
+// locale is the review's output language; the caller must have already normalized it (resolveLocale / effectiveDefaultLocale)
+// since store.Put writes it verbatim into the cache key with no value-domain validation of its own.
+func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, suggestions json.RawMessage, budget *budgetReportPayload, source string, createdByLogin string, locale string) string {
 	if source == "" {
 		source = "manual"
 	}
@@ -365,6 +392,7 @@ func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, sugg
 		Repo:     pr.Repo,
 		PRNumber: pr.Number,
 		HeadSHA:  pr.HeadSHA,
+		Locale:   locale,
 		Payload:  payload,
 	}
 	// a non-empty UserID string → a real owner (per-user visibility + ownership check on delete)
@@ -436,16 +464,17 @@ func buildPerStageContexts(
 	return out
 }
 
-// newStage builds the review.Stage matching name and injects that stage's model (an empty model means the provider default).
-// ok=false means the stage name is unknown. The steer rerun path reuses this same per-stage model routing.
-func newStage(name, model string) (review.Stage, bool) {
+// newStage builds the review.Stage matching name and injects that stage's model (an empty model means the provider default)
+// and the resolved per-request locale (output language). ok=false means the stage name is unknown.
+// The steer rerun path reuses this same per-stage model + locale routing.
+func newStage(name, model string, locale i18n.Locale) (review.Stage, bool) {
 	switch name {
 	case "summary":
-		return review.SummaryStage{Model: model}, true
+		return review.SummaryStage{Model: model, Locale: locale}, true
 	case "risks":
-		return review.RisksStage{Model: model}, true
+		return review.RisksStage{Model: model, Locale: locale}, true
 	case "suggestions":
-		return review.SuggestionsStage{Model: model}, true
+		return review.SuggestionsStage{Model: model, Locale: locale}, true
 	default:
 		return nil, false
 	}
@@ -454,7 +483,7 @@ func newStage(name, model string) (review.Stage, bool) {
 // mergeStages runs summary + risks + suggestions concurrently and merges their events onto one channel.
 // A failing stage emits one error event rather than aborting the whole stream.
 // ctxByStage is keyed by Stage.Name(); a missing key falls back to ctxByStage["summary"]
-func mergeStages(ctx context.Context, ctxByStage map[string]prctx.Context, def llm.Provider, models *llm.Registry, stageModels map[string]string) <-chan review.Event {
+func mergeStages(ctx context.Context, ctxByStage map[string]prctx.Context, def llm.Provider, models *llm.Registry, stageModels map[string]string, locale i18n.Locale) <-chan review.Event {
 	merged := make(chan review.Event, 16)
 	var wg sync.WaitGroup
 
@@ -464,7 +493,7 @@ func mergeStages(ctx context.Context, ctxByStage map[string]prctx.Context, def l
 	wg.Add(len(names))
 	for _, name := range names {
 		prov, model := resolveProvider(def, models, stageModels[name])
-		stage, _ := newStage(name, model)
+		stage, _ := newStage(name, model, locale)
 		c, ok := ctxByStage[name]
 		if !ok {
 			c = fallback

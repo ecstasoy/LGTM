@@ -41,7 +41,7 @@ func safeRedirectPath(next string) string {
 func AuthLogin(oa *oauth.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if oa == nil || oa.ClientID == "" {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "GitHub OAuth 未配置（缺 GITHUB_OAUTH_CLIENT_ID）"})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "GitHub OAuth 未配置（缺 GITHUB_OAUTH_CLIENT_ID）", "code": CodeOAuthNotConfigured})
 			return
 		}
 		state, err := randomState()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/prompts"
@@ -30,16 +31,25 @@ type Suggestion struct {
 	Patch *Patch `json:"patch,omitempty"`
 }
 
-// SuggestionsStage 渲染 suggestions.tmpl，强制 JSON 输出，解析后 emit 一次 suggestions_done。
+// suggestionsSystemByLocale carries the persona and the output-format instruction; the stage template carries the task.
+// The EN entry spells out "in English" explicitly: suggestions has free-text title/body fields (unlike risks'
+// single "reason" field), and without this it is the stage most likely to still answer in Chinese.
+var suggestionsSystemByLocale = map[i18n.Locale]string{
+	i18n.ZH: "你是一位 code reviewer，仅按要求输出严格 JSON。",
+	i18n.EN: "You are a code reviewer. Emit strict JSON exactly as specified, nothing else. Write every string field in English.",
+}
+
+// SuggestionsStage 渲染 suggestions.<locale>.tmpl，强制 JSON 输出，解析后 emit 一次 suggestions_done。
 type SuggestionsStage struct {
 	Model       string
 	Temperature float32
+	Locale      i18n.Locale // Output language; a zero value fails template/system lookup, so callers must set it explicitly.
 }
 
 func (SuggestionsStage) Name() string { return "suggestions" }
 
 func (s SuggestionsStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<-chan Event, error) {
-	tmpl, err := prompts.Parse("suggestions.tmpl")
+	tmpl, err := prompts.ParseFor("suggestions", s.Locale)
 	if err != nil {
 		return nil, fmt.Errorf("suggestions: load template: %w", err)
 	}
@@ -49,7 +59,7 @@ func (s SuggestionsStage) Run(ctx context.Context, c prctx.Context, p llm.Provid
 	}
 
 	chunks, err := p.Stream(ctx, llm.Request{
-		System:      "你是一位 code reviewer，仅按要求输出严格 JSON。",
+		System:      suggestionsSystemByLocale[s.Locale],
 		User:        buf.String(),
 		Model:       s.Model,
 		Temperature: s.Temperature,

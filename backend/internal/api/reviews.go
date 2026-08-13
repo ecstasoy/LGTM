@@ -36,8 +36,8 @@ type reviewListItem struct {
 	Title      string     `json:"title,omitempty"`
 	CreatedAt  string     `json:"created_at"`
 	CI         string     `json:"ci,omitempty"`
-	Lang       string     `json:"lang,omitempty"` // the PR's primary language (what detectPrimaryLang returned); used by the /history language filter
-	Source     string     `json:"source,omitempty"` // "manual" / "webhook"; the frontend renders the ⚡ chip from this
+	Lang       string     `json:"lang,omitempty"`       // the PR's primary language (what detectPrimaryLang returned); used by the /history language filter
+	Source     string     `json:"source,omitempty"`     // "manual" / "webhook"; the frontend renders the ⚡ chip from this
 	CreatedBy  string     `json:"created_by,omitempty"` // GitHub login; empty = anonymous leftover; the frontend gates the delete button on it
 	RiskCounts riskCounts `json:"risk_counts"`
 }
@@ -46,15 +46,15 @@ type reviewListItem struct {
 // for the review page top bar and the three views (the cached instant-load path no longer has to go back to GitHub for meta).
 type reviewDetail struct {
 	reviewListItem
-	Author      string          `json:"author,omitempty"`
-	AuthorRole  string          `json:"author_role,omitempty"`
-	State       string          `json:"state,omitempty"`
-	Labels      []string        `json:"labels,omitempty"`
-	BaseRef     string          `json:"base_ref,omitempty"`
-	HeadRef     string          `json:"head_ref,omitempty"`
-	PRCreatedAt time.Time       `json:"pr_created_at,omitzero"`
-	Stats       gh.Stats        `json:"stats,omitzero"`
-	Checks      []gh.Check      `json:"checks,omitempty"`
+	Author       string               `json:"author,omitempty"`
+	AuthorRole   string               `json:"author_role,omitempty"`
+	State        string               `json:"state,omitempty"`
+	Labels       []string             `json:"labels,omitempty"`
+	BaseRef      string               `json:"base_ref,omitempty"`
+	HeadRef      string               `json:"head_ref,omitempty"`
+	PRCreatedAt  time.Time            `json:"pr_created_at,omitzero"`
+	Stats        gh.Stats             `json:"stats,omitzero"`
+	Checks       []gh.Check           `json:"checks,omitempty"`
 	Files        []gh.File            `json:"files,omitempty"` // for rendering the Diff view; the list endpoint omits this large field
 	Summary      string               `json:"summary"`
 	Risks        json.RawMessage      `json:"risks,omitempty"`
@@ -106,7 +106,7 @@ func ListReviews(d Deps) gin.HandlerFunc {
 		// login required: the list carries PR title / repo / risk content and should expose nobody's submissions to an anonymous visitor
 		s := CurrentSession(c)
 		if d.Sessions != nil && s == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录后查看评审历史"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录后查看评审历史", "code": CodeHistoryLoginRequired})
 			return
 		}
 		limit := parseLimit(c.Query("limit"))
@@ -175,7 +175,7 @@ func DeleteReview(d Deps) gin.HandlerFunc {
 		}
 		s := CurrentSession(c)
 		if s == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录", "code": CodeNotLoggedIn})
 			return
 		}
 		id := c.Param("id")
@@ -190,7 +190,7 @@ func DeleteReview(d Deps) gin.HandlerFunc {
 		}
 		// not an anonymous leftover → owner only
 		if rec.UserID != nil && *rec.UserID != s.Login {
-			c.JSON(http.StatusForbidden, gin.H{"error": "只能删除你创建的评审"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "只能删除你创建的评审", "code": CodeNotReviewOwner})
 			return
 		}
 		if err := d.Store.Delete(c.Request.Context(), id); err != nil {

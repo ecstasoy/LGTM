@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
@@ -36,7 +37,7 @@ func TestRisksStage_Run_Success(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"risks":[{"file":"main.go","line":42,"severity":"high","category":"bug","confidence":0.95,"reason":"空指针解引用"},{"file":"util.go","severity":"low","category":"style","confidence":0.6,"reason":"命名不清"}]}`
 
-	ch, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestRisksStage_Run_EmptyRisks(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"risks":[]}`
 
-	ch, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestRisksStage_Run_MalformedJSON(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = "not json at all"
 
-	ch, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -104,8 +105,39 @@ func TestRisksStage_Run_MalformedJSON(t *testing.T) {
 	}
 }
 
+// TestRisksStage_Run_SystemPromptByLocale pins the exact System string MockProvider.Stream receives for each
+// locale, independent of risksSystemByLocale itself (expected strings are hardcoded here, not looked up from the
+// map), so a typo'd or removed map entry fails this test instead of compiling away silently.
+func TestRisksStage_Run_SystemPromptByLocale(t *testing.T) {
+	cases := []struct {
+		locale i18n.Locale
+		want   string
+	}{
+		{i18n.ZH, "你是一位 code reviewer，仅按要求输出严格 JSON。"},
+		{i18n.EN, "You are a code reviewer. Emit strict JSON exactly as specified, nothing else."},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.locale), func(t *testing.T) {
+			p := llm.NewMockProvider()
+			p.Reply = `{"risks":[]}`
+			ch, err := RisksStage{Locale: tc.locale}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			drainRisks(t, ch)
+			got := p.LastRequest()
+			if got == nil {
+				t.Fatal("LastRequest() = nil; Stream was never called")
+			}
+			if got.System != tc.want {
+				t.Errorf("System = %q, want %q", got.System, tc.want)
+			}
+		})
+	}
+}
+
 func TestRisksStage_Run_StreamError(t *testing.T) {
-	_, err := RisksStage{}.Run(context.Background(), prctx.Context{L1Meta: "test"}, errProvider{err: streamErr{msg: "stream failed"}})
+	_, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, errProvider{err: streamErr{msg: "stream failed"}})
 	if err == nil {
 		t.Fatal("期望同步 Stream 错误向上冒")
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 )
@@ -27,7 +28,8 @@ type Stage interface {
 type Orchestrator struct {
 	Provider llm.Provider
 	Builder  prctx.Builder
-	Stages   []Stage // 默认 [SummaryStage{}, RisksStage{}, SuggestionsStage{}]
+	Locale   i18n.Locale // Passed to each default stage's Locale field; picks the system-prompt and template language.
+	Stages   []Stage     // 默认 [SummaryStage{Locale: o.Locale}, RisksStage{Locale: o.Locale}, SuggestionsStage{Locale: o.Locale}]
 }
 
 // Run 启动配置好的所有 stage，返回合并后的事件 channel。

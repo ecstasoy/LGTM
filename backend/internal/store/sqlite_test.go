@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -37,7 +41,7 @@ func TestSQLiteStore_PutGet_RoundTrip(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
-	got, err := s.Get(ctx, "golang", "go", 42, "sha-A")
+	got, err := s.Get(ctx, "golang", "go", 42, "sha-A", DefaultLocale)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -58,7 +62,7 @@ func TestSQLiteStore_PutGet_RoundTrip(t *testing.T) {
 func TestSQLiteStore_Get_MissReturnsNilNilNotError(t *testing.T) {
 	s := newTestStore(t)
 
-	got, err := s.Get(context.Background(), "x", "y", 1, "nope")
+	got, err := s.Get(context.Background(), "x", "y", 1, "nope", DefaultLocale)
 	if err != nil {
 		t.Fatalf("Get 未命中不应报错，得到 %v", err)
 	}
@@ -86,7 +90,7 @@ func TestSQLiteStore_Put_SameSHAPreservesID(t *testing.T) {
 		t.Fatalf("Put 2: %v", err)
 	}
 
-	got, err := s.Get(ctx, in1.Owner, in1.Repo, in1.PRNumber, in1.HeadSHA)
+	got, err := s.Get(ctx, in1.Owner, in1.Repo, in1.PRNumber, in1.HeadSHA, DefaultLocale)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -161,7 +165,7 @@ func TestSQLiteStore_List_FiltersByUserID(t *testing.T) {
 		t.Errorf("user_id=alice 应只返 alice 的记录，得到 %+v", aliceList)
 	}
 
-	got, err := s.Get(ctx, pubRec.Owner, pubRec.Repo, pubRec.PRNumber, pubRec.HeadSHA)
+	got, err := s.Get(ctx, pubRec.Owner, pubRec.Repo, pubRec.PRNumber, pubRec.HeadSHA, DefaultLocale)
 	if err != nil {
 		t.Fatalf("Get public: %v", err)
 	}
@@ -256,5 +260,399 @@ func TestNewID_UniqueAndSortable(t *testing.T) {
 	}
 	if a >= b {
 		t.Errorf("先生成的 ULID 应字典序在前: %s >= %s", a, b)
+	}
+}
+
+func TestZhAndEnReviewsCoexist(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	zh := &Record{
+		ID: "rec-zh", Owner: "o", Repo: "r", PRNumber: 1, HeadSHA: "sha",
+		Locale: "zh", Payload: json.RawMessage(`{"summary":"zh"}`), CreatedAt: time.Now(),
+	}
+	en := &Record{
+		ID: "rec-en", Owner: "o", Repo: "r", PRNumber: 1, HeadSHA: "sha",
+		Locale: "en", Payload: json.RawMessage(`{"summary":"en"}`), CreatedAt: time.Now(),
+	}
+	if err := s.Put(ctx, zh); err != nil {
+		t.Fatalf("put zh: %v", err)
+	}
+	if err := s.Put(ctx, en); err != nil {
+		t.Fatalf("put en: %v", err)
+	}
+
+	got, err := s.Get(ctx, "o", "r", 1, "sha", "en")
+	if err != nil {
+		t.Fatalf("get en: %v", err)
+	}
+	if got == nil || got.ID != "rec-en" {
+		t.Fatalf("get en returned %+v, want rec-en", got)
+	}
+	if got.Locale != "en" || string(got.Payload) != `{"summary":"en"}` {
+		t.Fatalf("get en returned locale=%q payload=%s", got.Locale, got.Payload)
+	}
+
+	got, err = s.Get(ctx, "o", "r", 1, "sha", "zh")
+	if err != nil {
+		t.Fatalf("get zh: %v", err)
+	}
+	if got == nil || got.ID != "rec-zh" {
+		t.Fatalf("get zh returned %+v, want rec-zh", got)
+	}
+	if got.Locale != "zh" || string(got.Payload) != `{"summary":"zh"}` {
+		t.Fatalf("get zh returned locale=%q payload=%s", got.Locale, got.Payload)
+	}
+}
+
+// TestZhAndEnUserReviewsCoexist covers the second unique index, the user_id IS NOT NULL one.
+func TestZhAndEnUserReviewsCoexist(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	alice := "alice"
+
+	for _, locale := range []string{"zh", "en"} {
+		if err := s.Put(ctx, &Record{
+			ID: "rec-" + locale, UserID: &alice, Owner: "o", Repo: "r", PRNumber: 1,
+			HeadSHA: "sha", Locale: locale, Payload: json.RawMessage(`{}`), CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("put %s: %v", locale, err)
+		}
+	}
+	list, err := s.List(ctx, &alice, 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want both locales stored for alice, got %d rows", len(list))
+	}
+	seen := map[string]bool{}
+	for _, r := range list {
+		seen[r.Locale] = true
+	}
+	if !seen["zh"] || !seen["en"] {
+		t.Fatalf("List did not return both locales: %+v", seen)
+	}
+}
+
+// legacySchemaSQL is the pre-i18n reviews table: no locale column, four-column unique indexes.
+const legacySchemaSQL = `
+CREATE TABLE reviews (
+	id TEXT PRIMARY KEY, user_id TEXT, owner TEXT NOT NULL, repo TEXT NOT NULL,
+	pr_number INTEGER NOT NULL, head_sha TEXT NOT NULL, payload BLOB NOT NULL,
+	created_at INTEGER NOT NULL);
+CREATE UNIQUE INDEX idx_reviews_public_unique
+	ON reviews(owner, repo, pr_number, head_sha) WHERE user_id IS NULL;
+CREATE UNIQUE INDEX idx_reviews_user_unique
+	ON reviews(user_id, owner, repo, pr_number, head_sha) WHERE user_id IS NOT NULL;
+CREATE INDEX idx_reviews_user ON reviews(user_id, created_at DESC);
+`
+
+func TestSchemaApplyIsIdempotentOnLegacyDatabases(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.db")
+
+	// Build a pre-i18n database: reviews without a locale column, plus one existing Chinese review.
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(legacySchemaSQL); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	legacyCreatedAt := time.Unix(1000, 0).UTC()
+	if _, err := db.Exec(
+		`INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, payload, created_at)
+		 VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
+		"rec-legacy", "o", "r", 1, "sha-legacy", []byte(`{"summary":"老记录"}`), legacyCreatedAt.UnixNano(),
+	); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Opening twice must both migrate cleanly and stay idempotent.
+	for i := range 2 {
+		s, err := NewSQLiteStore(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+		ctx := context.Background()
+
+		if err := s.Put(ctx, &Record{
+			ID: fmt.Sprintf("rec-%d", i), Owner: "o", Repo: "r", PRNumber: 1,
+			HeadSHA: fmt.Sprintf("sha-%d", i), Locale: "en",
+			Payload: json.RawMessage(`{}`), CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("put %d: %v", i, err)
+		}
+
+		// The pre-i18n row survived the migration and is now labelled zh.
+		legacy, err := s.Get(ctx, "o", "r", 1, "sha-legacy", "zh")
+		if err != nil {
+			t.Fatalf("get legacy %d: %v", i, err)
+		}
+		if legacy == nil || legacy.ID != "rec-legacy" {
+			t.Fatalf("legacy row lost on open %d: %+v", i, legacy)
+		}
+		if legacy.Locale != "zh" {
+			t.Fatalf("legacy row locale = %q on open %d, want zh", legacy.Locale, i)
+		}
+		if string(legacy.Payload) != `{"summary":"老记录"}` || !legacy.CreatedAt.Equal(legacyCreatedAt) {
+			t.Fatalf("legacy row corrupted on open %d: payload=%s created_at=%v", i, legacy.Payload, legacy.CreatedAt)
+		}
+
+		// An en review of the same PR as the legacy zh one: only possible once the old
+		// four-column unique index is gone.
+		if err := s.Put(ctx, &Record{
+			ID: fmt.Sprintf("rec-legacy-en-%d", i), Owner: "o", Repo: "r", PRNumber: 1,
+			HeadSHA: "sha-legacy", Locale: "en", Payload: json.RawMessage(`{"summary":"en"}`),
+			CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("put en alongside legacy zh, open %d: %v", i, err)
+		}
+		gotEN, err := s.Get(ctx, "o", "r", 1, "sha-legacy", "en")
+		if err != nil {
+			t.Fatalf("get en %d: %v", i, err)
+		}
+		if gotEN == nil || gotEN.Locale != "en" {
+			t.Fatalf("en review not retrievable on open %d: %+v", i, gotEN)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatalf("close %d: %v", i, err)
+		}
+	}
+}
+
+// TestPutDefaultsEmptyLocaleToZh pins the compatibility rule for callers that predate i18n.
+func TestPutDefaultsEmptyLocaleToZh(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	in := sampleRecord("sha-default")
+	if err := s.Put(ctx, in); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	got, err := s.Get(ctx, in.Owner, in.Repo, in.PRNumber, in.HeadSHA, "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil || got.Locale != "zh" {
+		t.Fatalf("empty locale should be stored and read back as zh, got %+v", got)
+	}
+	if byID, err := s.GetByID(ctx, in.ID); err != nil || byID == nil || byID.Locale != "zh" {
+		t.Fatalf("GetByID must select locale, got %+v err=%v", byID, err)
+	}
+	list, err := s.List(ctx, nil, 10)
+	if err != nil || len(list) != 1 || list[0].Locale != "zh" {
+		t.Fatalf("List must select locale, got %+v err=%v", list, err)
+	}
+}
+
+// sqliteSchemaVersion reads the header counter SQLite bumps on every schema change.
+// An unchanged value across a startup proves that startup issued no DDL at all.
+func sqliteSchemaVersion(t *testing.T, path string) int64 {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open for schema_version: %v", err)
+	}
+	defer db.Close()
+	var v int64
+	if err := db.QueryRow("PRAGMA schema_version").Scan(&v); err != nil {
+		t.Fatalf("read schema_version: %v", err)
+	}
+	return v
+}
+
+// sqliteIndexDefs maps index name to its CREATE statement for the reviews table.
+func sqliteIndexDefs(t *testing.T, path string) map[string]string {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open for index defs: %v", err)
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'reviews'`)
+	if err != nil {
+		t.Fatalf("read index defs: %v", err)
+	}
+	defer rows.Close()
+	defs := map[string]string{}
+	for rows.Next() {
+		var name string
+		var ddl sql.NullString
+		if err := rows.Scan(&name, &ddl); err != nil {
+			t.Fatalf("scan index def: %v", err)
+		}
+		defs[name] = ddl.String
+	}
+	return defs
+}
+
+func sqliteHasLocaleColumn(t *testing.T, path string) bool {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open for table_info: %v", err)
+	}
+	defer db.Close()
+	rows, err := db.Query("PRAGMA table_info(reviews)")
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid                 int
+			name, ctype         string
+			notNull, primaryKey int
+			dflt                sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &primaryKey); err != nil {
+			t.Fatalf("scan table_info: %v", err)
+		}
+		if name == "locale" {
+			return true
+		}
+	}
+	return false
+}
+
+// newLegacyDatabase writes a pre-i18n database file: no locale column, four-column unique indexes.
+func newLegacyDatabase(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(legacySchemaSQL); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	return path
+}
+
+// TestSchemaApplySkipsIndexDDLOnceMigrated is the steady-state guarantee: the first startup migrates,
+// every startup after it touches no schema, so restarts stop paying for an index rebuild.
+func TestSchemaApplySkipsIndexDDLOnceMigrated(t *testing.T) {
+	path := newLegacyDatabase(t)
+
+	beforeMigration := sqliteSchemaVersion(t, path)
+
+	s, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	afterMigration := sqliteSchemaVersion(t, path)
+	if afterMigration == beforeMigration {
+		t.Fatalf("first open should have migrated, schema_version stayed at %d", beforeMigration)
+	}
+	defs := sqliteIndexDefs(t, path)
+	if !reviewIndexesCarryLocale(defs) {
+		t.Fatalf("first open left indexes without locale: %+v", defs)
+	}
+
+	// Second startup: nothing to do, so nothing may be executed.
+	s2, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	if err := s2.Close(); err != nil {
+		t.Fatalf("close 2: %v", err)
+	}
+	afterRestart := sqliteSchemaVersion(t, path)
+	if afterRestart != afterMigration {
+		t.Fatalf("second startup issued DDL: schema_version %d -> %d", afterMigration, afterRestart)
+	}
+
+	// A third startup on the already-correct database must also be inert.
+	s3, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("third open: %v", err)
+	}
+	if err := s3.Close(); err != nil {
+		t.Fatalf("close 3: %v", err)
+	}
+	if v := sqliteSchemaVersion(t, path); v != afterMigration {
+		t.Fatalf("third startup issued DDL: schema_version %d -> %d", afterMigration, v)
+	}
+}
+
+// TestSchemaApplyRollsBackOnIndexFailure covers the crash window. The driver runs a multi-statement
+// script one statement at a time, so a mid-script failure without a transaction would commit the DROPs
+// and leave reviews with no unique index at all -- every Put would then fail on its ON CONFLICT clause.
+// Both injection points must leave the pre-i18n schema exactly as it was.
+func TestSchemaApplyRollsBackOnIndexFailure(t *testing.T) {
+	const boom = "CREATE INDEX idx_boom ON reviews(no_such_column);"
+	drops := "DROP INDEX IF EXISTS idx_reviews_public_unique;\nDROP INDEX IF EXISTS idx_reviews_user_unique;\n"
+
+	for _, tc := range []struct {
+		name     string
+		poisoned string
+	}{
+		// The dangerous window: both unique indexes are already gone when the failure lands.
+		{"fails between the drops and the creates", drops + boom + "\n" + indexesSQL},
+		{"fails after the creates", indexesSQL + "\n" + boom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := newLegacyDatabase(t)
+			before := sqliteIndexDefs(t, path)
+			beforeVersion := sqliteSchemaVersion(t, path)
+
+			db, err := sql.Open("sqlite3", path)
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			defer db.Close()
+
+			if err := applySQLiteSchema(context.Background(), db, schemaSQL, tc.poisoned); err == nil {
+				t.Fatal("poisoned index script should have failed")
+			}
+
+			after := sqliteIndexDefs(t, path)
+			for _, name := range reviewUniqueIndexNames {
+				ddl, ok := after[name]
+				if !ok {
+					t.Fatalf("rollback lost %s; the table is left with no unique index", name)
+				}
+				if strings.Contains(ddl, "locale") {
+					t.Fatalf("%s was left rebuilt after a failed migration: %s", name, ddl)
+				}
+				if ddl != before[name] {
+					t.Fatalf("%s changed across a failed migration:\n before: %s\n after:  %s", name, before[name], ddl)
+				}
+			}
+			if _, ok := after["idx_boom"]; ok {
+				t.Fatal("the failing statement's siblings were committed")
+			}
+			if sqliteHasLocaleColumn(t, path) {
+				t.Fatal("locale column survived a rolled-back migration")
+			}
+			if v := sqliteSchemaVersion(t, path); v != beforeVersion {
+				t.Fatalf("failed migration changed the schema: schema_version %d -> %d", beforeVersion, v)
+			}
+
+			// The database is still usable, and a later good startup still migrates it fully.
+			s, err := NewSQLiteStore(path)
+			if err != nil {
+				t.Fatalf("recovery open: %v", err)
+			}
+			defer s.Close()
+			if !reviewIndexesCarryLocale(sqliteIndexDefs(t, path)) {
+				t.Fatal("recovery open did not migrate the indexes")
+			}
+			if err := s.Put(context.Background(), &Record{
+				ID: "rec-recovered", Owner: "o", Repo: "r", PRNumber: 1, HeadSHA: "sha",
+				Locale: "en", Payload: json.RawMessage(`{}`), CreatedAt: time.Now(),
+			}); err != nil {
+				t.Fatalf("put after recovery: %v", err)
+			}
+		})
 	}
 }

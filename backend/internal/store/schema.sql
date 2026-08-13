@@ -1,23 +1,14 @@
--- v1 schema；v2 加 users / comments 表不破坏现有。
+-- v1 schema; adding users / comments tables in v2 will not break this.
+-- Tables only: indexes live in indexes.sql because they must run after the locale backfill.
 
 CREATE TABLE IF NOT EXISTS reviews (
     id          TEXT PRIMARY KEY,
-    user_id     TEXT,                       -- v1 可空；v2 OAuth 后填
+    user_id     TEXT,                       -- nullable in v1; filled in after OAuth in v2
     owner       TEXT NOT NULL,
     repo        TEXT NOT NULL,
     pr_number   INTEGER NOT NULL,
     head_sha    TEXT NOT NULL,
-    payload     BLOB NOT NULL,             -- 序列化后的 review.Result 字节数据
-    created_at  INTEGER NOT NULL           -- Unix 时间戳（纳秒）
+    locale      TEXT NOT NULL DEFAULT 'zh', -- review output language, part of the cache identity
+    payload     BLOB NOT NULL,              -- serialized review.Result bytes
+    created_at  INTEGER NOT NULL            -- Unix timestamp (nanoseconds)
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_public_unique
-    ON reviews(owner, repo, pr_number, head_sha)
-    WHERE user_id IS NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_user_unique
-    ON reviews(user_id, owner, repo, pr_number, head_sha)
-    WHERE user_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_reviews_user
-    ON reviews(user_id, created_at DESC);

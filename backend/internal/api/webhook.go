@@ -53,10 +53,10 @@ type WebhookPR struct {
 type WebhookIssueComment struct {
 	Action string `json:"action"`
 	Issue  struct {
-		Number      int    `json:"number"`
-		HTMLURL     string `json:"html_url"`
-		Title       string `json:"title"`
-		User        struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+		Title   string `json:"title"`
+		User    struct {
 			Login string `json:"login"` // PR author; also notified when a slash command triggers the review
 		} `json:"user"`
 		PullRequest *struct {
@@ -358,9 +358,13 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		return
 	}
 
-	// idempotency check: an existing review for the same (owner, repo, pr, head_sha) → skip
+	// webhook has no user request to negotiate a locale from; it always uses the deployment-configured default
+	// (already normalized to "zh"/"en" at startup — see Deps.DefaultLocale / effectiveDefaultLocale).
+	locale := effectiveDefaultLocale(d)
+
+	// idempotency check: an existing review for the same (owner, repo, pr, head_sha, locale) → skip
 	if d.Store != nil {
-		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA); rec != nil {
+		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(locale)); rec != nil {
 			slog.Info("webhook: cache hit, skipping re-review", "review_id", rec.ID)
 			for _, login := range uniqueRecipients(args.SenderLogin, args.PRAuthorLogin) {
 				PushNotification(ctx, d.Cache, login, Notification{
@@ -391,7 +395,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	budget := toBudgetPayload(pCtx.BudgetReport)
 
 	ctxByStage := buildPerStageContexts(ctx, builder, pr, pCtx)
-	merged := mergeStages(ctx, ctxByStage, d.Provider, d.Models, d.StageModels)
+	merged := mergeStages(ctx, ctxByStage, d.Provider, d.Models, d.StageModels, locale)
 
 	var (
 		summaryBuf      strings.Builder
@@ -424,7 +428,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	if d.Store != nil {
 		// a webhook-created review is owned by the PR author (there is no login context, so ownership follows PR meta)
 		// that way the PR author sees and can delete their own repo's automatic reviews once logged in to lgtm.com
-		reviewID = persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "webhook", args.PRAuthorLogin)
+		reviewID = persistReview(d.Store, pr, summaryBuf.String(), risksData, suggestionsData, budget, "webhook", args.PRAuthorLogin, string(locale))
 	}
 
 	// push the bot review back to the PR (using the installation token)

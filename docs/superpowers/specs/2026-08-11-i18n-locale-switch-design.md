@@ -109,14 +109,14 @@ const t = useT();
 `POST /api/reviews` 及 per-stage / SSE 变体，三级回退：
 
 ```
-请求体 locale 字段 → Accept-Language 头 → LGTM_DEFAULT_LOCALE
+请求体 locale 字段 → Accept-Language 头 → DEFAULT_LOCALE
 ```
 
 前端每次提交带上当前 locale。Agent 对话（steer）同理。
 
-`LGTM_DEFAULT_LOCALE`（默认 `zh`）是全局唯一的兜底配置：既作为上述三级回退的最后一级，也直接用于 webhook 自动评审——那条路径没有用户在场，请求体和 `Accept-Language` 都无从谈起。
+`DEFAULT_LOCALE`（默认 `zh`）是全局唯一的兜底配置：既作为上述三级回退的最后一级，也直接用于 webhook 自动评审——那条路径没有用户在场，请求体和 `Accept-Language` 都无从谈起。
 
-无法识别的 locale 值（既非 `zh` 也非 `en`）一律落到 `LGTM_DEFAULT_LOCALE`，不报错。
+无法识别的 locale 值（既非 `zh` 也非 `en`）一律落到 `DEFAULT_LOCALE`，不报错。
 
 ### API 错误文案：后端加稳定 code，前端查字典
 
@@ -130,7 +130,7 @@ const t = useT();
 
 选它而不是「后端按 `Accept-Language` 自己翻」，是因为这样所有 UI 文案仍集中在前端字典一处，并自动享受 `en: Dict = typeof zh` 的编译期漏翻检查；Go 那边没有等价的静态保护。
 
-`internal/api/webhook.go` 回贴到 GitHub PR 的文案不走 `code` 路径——那是发给 GitHub 而非本站 UI 的，按 `LGTM_DEFAULT_LOCALE` 取值。
+`internal/api/webhook.go` 回贴到 GitHub PR 的文案不走 `code` 路径——那是发给 GitHub 而非本站 UI 的，按 `DEFAULT_LOCALE` 取值。
 
 ### 回流到前端
 

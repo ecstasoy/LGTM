@@ -6,15 +6,23 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/prompts"
 )
 
-// SummaryStage 渲染 summary.tmpl，吃 L1 + L2 + L3，输出 markdown 总结。
+// summarySystemByLocale carries the persona and the output-language instruction; the stage template carries the task.
+var summarySystemByLocale = map[i18n.Locale]string{
+	i18n.ZH: "你是一位 code reviewer，回答请使用中文 Markdown。",
+	i18n.EN: "You are a code reviewer. Answer in English Markdown.",
+}
+
+// SummaryStage 渲染 summary.<locale>.tmpl，吃 L1 + L2 + L3，输出 markdown 总结。
 type SummaryStage struct {
-	Model       string  // 覆盖 provider 默认 model；空串走默认
-	Temperature float32 // 0 走 provider 默认
+	Model       string      // 覆盖 provider 默认 model；空串走默认
+	Temperature float32     // 0 走 provider 默认
+	Locale      i18n.Locale // Output language; a zero value fails template/system lookup, so callers must set it explicitly.
 }
 
 // Name 实现 Stage
@@ -22,7 +30,7 @@ func (SummaryStage) Name() string { return "summary" }
 
 // Run 实现 Stage
 func (s SummaryStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<-chan Event, error) {
-	tmpl, err := prompts.Parse("summary.tmpl")
+	tmpl, err := prompts.ParseFor("summary", s.Locale)
 	if err != nil {
 		return nil, fmt.Errorf("summary: load template: %w", err)
 	}
@@ -32,7 +40,7 @@ func (s SummaryStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) 
 	}
 
 	chunks, err := p.Stream(ctx, llm.Request{
-		System:      "你是一位 code reviewer，回答请使用中文 Markdown。",
+		System:      summarySystemByLocale[s.Locale],
 		User:        buf.String(),
 		Model:       s.Model,
 		Temperature: s.Temperature,

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestPostgresStore_PutGet_RoundTrip(t *testing.T) {
 	if err := s.Put(ctx, rec); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	got, err := s.Get(ctx, rec.Owner, rec.Repo, rec.PRNumber, rec.HeadSHA)
+	got, err := s.Get(ctx, rec.Owner, rec.Repo, rec.PRNumber, rec.HeadSHA, DefaultLocale)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestPostgresStore_PutGet_RoundTrip(t *testing.T) {
 
 func TestPostgresStore_Get_MissReturnsNilNilNotError(t *testing.T) {
 	s := postgresTestStore(t)
-	got, err := s.Get(context.Background(), "no", "such", 1, "sha")
+	got, err := s.Get(context.Background(), "no", "such", 1, "sha", DefaultLocale)
 	if got != nil || err != nil {
 		t.Errorf("want (nil, nil), got (%v, %v)", got, err)
 	}
@@ -89,7 +90,7 @@ func TestPostgresStore_Put_SameSHAPreservesID(t *testing.T) {
 	if err := s.Put(ctx, rec2); err != nil {
 		t.Fatalf("put2: %v", err)
 	}
-	got, err := s.Get(ctx, rec1.Owner, rec1.Repo, rec1.PRNumber, rec1.HeadSHA)
+	got, err := s.Get(ctx, rec1.Owner, rec1.Repo, rec1.PRNumber, rec1.HeadSHA, DefaultLocale)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -142,3 +143,169 @@ func TestPostgresStore_Put_EmptyIDRejected(t *testing.T) {
 
 // 编译期断言 PostgresStore 实现 Store 接口
 var _ Store = (*PostgresStore)(nil)
+
+func TestPostgresZhAndEnReviewsCoexist(t *testing.T) {
+	s := postgresTestStore(t)
+	ctx := context.Background()
+
+	for _, locale := range []string{"zh", "en"} {
+		if err := s.Put(ctx, &Record{
+			ID: "rec-" + locale, Owner: "o", Repo: "r", PRNumber: 1, HeadSHA: "sha",
+			Locale: locale, Payload: json.RawMessage(`{"summary":"` + locale + `"}`),
+			CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("put %s: %v", locale, err)
+		}
+	}
+	for _, locale := range []string{"zh", "en"} {
+		got, err := s.Get(ctx, "o", "r", 1, "sha", locale)
+		if err != nil {
+			t.Fatalf("get %s: %v", locale, err)
+		}
+		if got == nil || got.ID != "rec-"+locale || got.Locale != locale {
+			t.Fatalf("get %s returned %+v", locale, got)
+		}
+	}
+}
+
+// legacyPostgresSchema rebuilds the pre-i18n table: no locale column, four-column unique indexes.
+var legacyPostgresSchema = []string{
+	`DROP TABLE IF EXISTS reviews`,
+	`CREATE TABLE reviews (
+		id TEXT PRIMARY KEY, user_id TEXT, owner TEXT NOT NULL, repo TEXT NOT NULL,
+		pr_number BIGINT NOT NULL, head_sha TEXT NOT NULL, payload BYTEA NOT NULL,
+		created_at BIGINT NOT NULL)`,
+	`CREATE UNIQUE INDEX idx_reviews_public_unique
+		ON reviews(owner, repo, pr_number, head_sha) WHERE user_id IS NULL`,
+	`CREATE UNIQUE INDEX idx_reviews_user_unique
+		ON reviews(user_id, owner, repo, pr_number, head_sha) WHERE user_id IS NOT NULL`,
+	`CREATE INDEX idx_reviews_user ON reviews(user_id, created_at DESC)`,
+}
+
+// TestPostgresSchemaApplyIsIdempotentOnLegacyDatabases mirrors the SQLite migration test:
+// a pre-i18n table plus the old four-column indexes must migrate in place and survive a restart.
+func TestPostgresSchemaApplyIsIdempotentOnLegacyDatabases(t *testing.T) {
+	s := postgresTestStore(t)
+	ctx := context.Background()
+
+	// Tear the schema back down to its pre-i18n shape, rows included.
+	for _, stmt := range legacyPostgresSchema {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("build legacy schema: %v", err)
+		}
+	}
+	legacyCreatedAt := time.Unix(1000, 0).UTC()
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, payload, created_at)
+		 VALUES ($1, NULL, $2, $3, $4, $5, $6, $7)`,
+		"rec-legacy", "o", "r", 1, "sha-legacy", []byte(`{"summary":"老记录"}`), legacyCreatedAt.UnixNano(),
+	); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	dsn := os.Getenv("PG_TEST_URL")
+	for i := range 2 {
+		migrated, err := NewPostgresStore(dsn)
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+
+		legacyRec, err := migrated.Get(ctx, "o", "r", 1, "sha-legacy", "zh")
+		if err != nil {
+			t.Fatalf("get legacy %d: %v", i, err)
+		}
+		if legacyRec == nil || legacyRec.ID != "rec-legacy" || legacyRec.Locale != "zh" {
+			t.Fatalf("legacy row not migrated on open %d: %+v", i, legacyRec)
+		}
+		if string(legacyRec.Payload) != `{"summary":"老记录"}` || !legacyRec.CreatedAt.Equal(legacyCreatedAt) {
+			t.Fatalf("legacy row corrupted on open %d: %s %v", i, legacyRec.Payload, legacyRec.CreatedAt)
+		}
+
+		// Only possible once the old four-column unique index is gone.
+		if err := migrated.Put(ctx, &Record{
+			ID: fmt.Sprintf("rec-legacy-en-%d", i), Owner: "o", Repo: "r", PRNumber: 1,
+			HeadSHA: "sha-legacy", Locale: "en", Payload: json.RawMessage(`{"summary":"en"}`),
+			CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("put en alongside legacy zh, open %d: %v", i, err)
+		}
+		gotEN, err := migrated.Get(ctx, "o", "r", 1, "sha-legacy", "en")
+		if err != nil || gotEN == nil || gotEN.Locale != "en" {
+			t.Fatalf("en review not retrievable on open %d: %+v err=%v", i, gotEN, err)
+		}
+		if err := migrated.Close(); err != nil {
+			t.Fatalf("close %d: %v", i, err)
+		}
+	}
+}
+
+// pgIndexOIDs maps index name to its pg_class OID. A DROP + CREATE always mints a new OID,
+// so unchanged OIDs across a startup prove that startup issued no index DDL.
+func pgIndexOIDs(t *testing.T, s *PostgresStore) map[string]int64 {
+	t.Helper()
+	rows, err := s.db.QueryContext(context.Background(),
+		`SELECT c.relname, c.oid::bigint FROM pg_class c
+		 JOIN pg_index i ON i.indexrelid = c.oid
+		 WHERE i.indrelid = 'reviews'::regclass`)
+	if err != nil {
+		t.Fatalf("read index oids: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var name string
+		var oid int64
+		if err := rows.Scan(&name, &oid); err != nil {
+			t.Fatalf("scan index oid: %v", err)
+		}
+		out[name] = oid
+	}
+	return out
+}
+
+// TestPostgresSchemaApplySkipsIndexDDLOnceMigrated is the steady-state guarantee on PG: skipping the
+// index script keeps the ACCESS EXCLUSIVE lock its DROPs take off every restart after the first.
+func TestPostgresSchemaApplySkipsIndexDDLOnceMigrated(t *testing.T) {
+	s := postgresTestStore(t)
+	ctx := context.Background()
+	dsn := os.Getenv("PG_TEST_URL")
+
+	// Tear back down to the pre-i18n shape so the next open has real work to do.
+	for _, stmt := range legacyPostgresSchema {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("build legacy schema: %v", err)
+		}
+	}
+	beforeMigration := pgIndexOIDs(t, s)
+
+	migrated, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	afterMigration := pgIndexOIDs(t, migrated)
+	for _, name := range reviewUniqueIndexNames {
+		if afterMigration[name] == beforeMigration[name] {
+			t.Fatalf("%s was not rebuilt by the migrating startup (oid %d)", name, afterMigration[name])
+		}
+	}
+	if err := migrated.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Second and third startups must touch nothing.
+	for i := range 2 {
+		restarted, err := NewPostgresStore(dsn)
+		if err != nil {
+			t.Fatalf("restart %d: %v", i, err)
+		}
+		got := pgIndexOIDs(t, restarted)
+		for name, oid := range afterMigration {
+			if got[name] != oid {
+				t.Fatalf("restart %d rebuilt %s: oid %d -> %d", i, name, oid, got[name])
+			}
+		}
+		if err := restarted.Close(); err != nil {
+			t.Fatalf("close restart %d: %v", i, err)
+		}
+	}
+}

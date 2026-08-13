@@ -12,6 +12,12 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
+// CodeRateLimited is the stable machine-readable code for the 429 response below. It intentionally lives
+// here rather than alongside api.errcode.go's constants: package api imports package middleware (router.go),
+// so middleware importing api's codes back would be a cycle. Same code-alongside-error-string convention,
+// separate list.
+const CodeRateLimited = "rate_limited"
+
 // RateLimitConfig is the fixed-window rate limit configuration for one endpoint group.
 //
 // The model moved from a token bucket to a fixed window:
@@ -82,6 +88,7 @@ func RateLimit(cache store.Cache, cfg RateLimitConfig) gin.HandlerFunc {
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error":       "请求过于频繁，请稍后再试",
+				"code":        CodeRateLimited,
 				"retry_after": retryAfter,
 			})
 			return
