@@ -201,7 +201,7 @@ export const zh = {
     reviewerPerspectiveNote: "reviewer 视角 · 任意公开 PR · 无需仓库权限",
     stepParseTitle: "解析 PR URL",
     stepFetchTitle: "拉取 PR meta + diff",
-    stepContextTitle: "构建三层上下文",
+    stepContextTitle: "构建四层上下文",
     stepLlmTitle: "并行调用 LLM",
     stepCacheTitle: "写入缓存",
     stepSteerTitle: "用户引导",

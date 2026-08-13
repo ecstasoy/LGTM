@@ -216,7 +216,7 @@ export const en: Dict = {
     reviewerPerspectiveNote: "Reviewer's-eye view · any public PR · no repo access needed",
     stepParseTitle: "Parse PR URL",
     stepFetchTitle: "Fetch PR meta + diff",
-    stepContextTitle: "Build three-layer context",
+    stepContextTitle: "Build four-layer context",
     stepLlmTitle: "Call LLM in parallel",
     stepCacheTitle: "Write to cache",
     stepSteerTitle: "User steering",
