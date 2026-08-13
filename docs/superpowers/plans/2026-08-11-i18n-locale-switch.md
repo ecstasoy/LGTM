@@ -15,7 +15,7 @@
 - locale 值域固定为 `"zh" | "en"`；无法识别的输入一律落到默认值，不报错
 - 统一用 **locale** 命名 i18n 概念。**禁止**用 `lang`——`backend/internal/api/lang.go` 已占用该词表示 PR 的编程语言
 - cookie 名：`lgtm-locale`，`path=/`，`max-age=31536000`，`samesite=lax`，非 httpOnly
-- 后端默认 locale 配置项：`LGTM_DEFAULT_LOCALE`，默认 `"zh"`
+- 后端默认 locale 配置项：`DEFAULT_LOCALE`，默认 `"zh"`
 - 代码注释、commit message、PR 正文一律英文；一条注释默认一行陈述句
 - 前端字典唯一真源是 `lib/i18n/dictionaries/zh.ts`；`en.ts` 声明为 `Dict = typeof zh`，漏翻即编译错误
 - 不新增运行时 i18n 依赖（不引 next-intl / i18next）
@@ -1241,14 +1241,14 @@ Expected: PASS
 ```go
 	// DefaultLocale is the single fallback for review output language: the last tier of the API's
 	// body > Accept-Language > default chain, and the value used by the webhook path, which has no user request.
-	DefaultLocale string `env:"LGTM_DEFAULT_LOCALE" envDefault:"zh"`
+	DefaultLocale string `env:"DEFAULT_LOCALE" envDefault:"zh"`
 ```
 
 - [ ] **Step 6: 提交**
 
 ```bash
 git add backend/internal/i18n backend/internal/config/config.go
-git commit -m "feat(i18n): add backend locale primitives and LGTM_DEFAULT_LOCALE"
+git commit -m "feat(i18n): add backend locale primitives and DEFAULT_LOCALE"
 ```
 
 ---
@@ -2059,7 +2059,7 @@ gh pr edit --base main
 | prompt 双文件分语言 | Task 16 |
 | 四处 System 串 | Task 17 |
 | locale 三级回退 | Task 19 |
-| `LGTM_DEFAULT_LOCALE` | Task 15、19 |
+| `DEFAULT_LOCALE` | Task 15、19 |
 | webhook 用默认 locale | Task 19 |
 | 错误响应加 code、前端查字典 | Task 19、21 |
 | `Result.locale` 回流 + 提示条 | Task 22 |
