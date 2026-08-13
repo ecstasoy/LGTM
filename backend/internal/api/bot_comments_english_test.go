@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 	"unicode"
 
@@ -37,6 +38,41 @@ func TestBuildBotReviewBody_NoCJK(t *testing.T) {
 		// sanity: the builder actually produced the scaffolding, not an empty string
 		if got == "" {
 			t.Errorf("trigger=%q: buildBotReviewBody returned empty output", trig)
+		}
+	}
+}
+
+// TestBuildBotReviewBody_SuggestionCountWording pins the exact sentence the suggestion-count line
+// renders for zero / one / many, so number agreement (and the zero-suggestion wording, which must
+// not reference an inline comment or an Apply button that don't exist) cannot silently regress.
+// This guards the defect class called out in review: a mechanical translation of the original
+// Chinese (which has no singular/plural distinction) reintroduced "Generated **1** suggestions".
+func TestBuildBotReviewBody_SuggestionCountWording(t *testing.T) {
+	cases := []struct {
+		count int
+		want  string
+	}{
+		{0, "✨ No inline suggestions this time — nothing stood out at the line level.\n\n"},
+		{1, "✨ Generated **1** suggestion, attached as an inline comment. Use GitHub's built-in \"Apply suggestion\" to commit it with a click.\n\n"},
+		{2, "✨ Generated **2** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n"},
+	}
+	for _, c := range cases {
+		got := buildBotReviewBody("summary", "rev123", c.count, "opened")
+		if !strings.Contains(got, c.want) {
+			t.Errorf("count=%d: expected body to contain %q, got:\n%s", c.count, c.want, got)
+		}
+		// zero must not claim an inline comment or an Apply button exists
+		if c.count == 0 {
+			if strings.Contains(got, "inline comment") && !strings.Contains(got, "No inline suggestions") {
+				t.Errorf("count=0: body should not reference inline comments outside the no-suggestions sentence:\n%s", got)
+			}
+			if strings.Contains(got, "Apply suggestion") {
+				t.Errorf("count=0: body should not tell the reader to click Apply suggestion when there are none:\n%s", got)
+			}
+		}
+		// singular/plural: "1 suggestions" must never appear, "2 suggestion," (missing s) must never appear
+		if strings.Contains(got, "**1** suggestions") {
+			t.Errorf("count=%d: found unagreed plural '1 suggestions':\n%s", c.count, got)
 		}
 	}
 }

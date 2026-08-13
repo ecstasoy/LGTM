@@ -533,7 +533,14 @@ func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) s
 		sb.WriteString(summary)
 		sb.WriteString("\n\n")
 	}
-	fmt.Fprintf(&sb, "✨ Generated **%d** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit one with a click.\n\n", sgCount)
+	switch sgCount {
+	case 0:
+		sb.WriteString("✨ No inline suggestions this time — nothing stood out at the line level.\n\n")
+	case 1:
+		sb.WriteString("✨ Generated **1** suggestion, attached as an inline comment. Use GitHub's built-in \"Apply suggestion\" to commit it with a click.\n\n")
+	default:
+		fmt.Fprintf(&sb, "✨ Generated **%d** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n", sgCount)
+	}
 	if reviewID != "" {
 		fmt.Fprintf(&sb, "🔗 Full review (risk list + RAG-retrieved context): https://lgtm-alpha.vercel.app/review/%s\n", reviewID)
 	}
