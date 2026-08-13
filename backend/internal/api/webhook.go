@@ -112,7 +112,7 @@ func WebhookGitHub(d Deps, webhookSecret string) gin.HandlerFunc {
 		// HMAC check: sha256=<hex>
 		sig := c.GetHeader("X-Hub-Signature-256")
 		if webhookSecret == "" {
-			slog.Warn("webhook: WEBHOOK_SECRET 未配；拒绝以防伪造")
+			slog.Warn("webhook: WEBHOOK_SECRET not configured; rejecting to prevent forged deliveries")
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "webhook secret not configured"})
 			return
 		}
@@ -262,7 +262,7 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 			slog.Warn("slash review: installation token failed", "err", err)
 		} else {
 			_, _ = d.OAuthClient.PostIssueComment(ctx, tok.Token, args.Owner, args.Repo, args.Number,
-				"🤖 LGTM 已收到 `/lgtm review`，正在评审…（约 30s 后回贴完整 review）")
+				"🤖 LGTM got your `/lgtm review` — reviewing now (full review lands in ~30s)…")
 		}
 	}
 
@@ -295,10 +295,10 @@ func runSlashHelp(d Deps, owner, repo string, prNumber int, installationID int64
 	if err != nil {
 		return
 	}
-	body := "🤖 **LGTM 可用命令**\n\n" +
-		"- `/lgtm review` —— 重新评审当前 PR（同 push 新 commit 自动触发的逻辑）\n" +
-		"- `/lgtm help` —— 显示本帮助\n\n" +
-		"<sub>更多命令开发中（如 `/lgtm explain <file>:<line>` 单独解释某行）</sub>"
+	body := "🤖 **LGTM available commands**\n\n" +
+		"- `/lgtm review` — re-review the current PR (same logic that runs automatically on a new push)\n" +
+		"- `/lgtm help` — show this help\n\n" +
+		"<sub>More commands are in the works (e.g. `/lgtm explain <file>:<line>` to explain a single line)</sub>"
 	_, _ = d.OAuthClient.PostIssueComment(ctx, tok.Token, owner, repo, prNumber, body)
 }
 
@@ -514,27 +514,30 @@ func postBotReview(
 
 // buildBotReviewBody assembles the summary + review stats + a link out to lgtm.com
 // trigger varies the wording: synchronize emphasizes "re-reviewed the latest push", a slash command thanks the user who triggered it
+//
+// Everything this function returns is posted straight to GitHub, so it is hardcoded English regardless of
+// DEFAULT_LOCALE — see the package-level note in comment.go for the rule this follows.
 func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) string {
 	var sb strings.Builder
 	switch trigger {
 	case "synchronize":
-		sb.WriteString("## 🔄 LGTM AI 重评（基于最新 push）\n\n")
+		sb.WriteString("## 🔄 LGTM AI re-review (latest push)\n\n")
 	case "reopened":
-		sb.WriteString("## 🔁 LGTM AI 重评（PR 重开）\n\n")
+		sb.WriteString("## 🔁 LGTM AI re-review (PR reopened)\n\n")
 	case "slash_review":
-		sb.WriteString("## 🤖 LGTM AI 评审（应 `/lgtm review` 触发）\n\n")
+		sb.WriteString("## 🤖 LGTM AI review (triggered by `/lgtm review`)\n\n")
 	default:
-		sb.WriteString("## 🤖 LGTM AI 自动评审\n\n")
+		sb.WriteString("## 🤖 LGTM AI automatic review\n\n")
 	}
 	if summary != "" {
 		sb.WriteString(summary)
 		sb.WriteString("\n\n")
 	}
-	fmt.Fprintf(&sb, "✨ 共生成 **%d** 条修改建议，已附在 inline 评论里。点 GitHub 自带的「Apply suggestion」可一键 commit。\n\n", sgCount)
+	fmt.Fprintf(&sb, "✨ Generated **%d** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit one with a click.\n\n", sgCount)
 	if reviewID != "" {
-		fmt.Fprintf(&sb, "🔗 完整评审（含风险列表 + RAG 召回上下文）：https://lgtm-alpha.vercel.app/review/%s\n", reviewID)
+		fmt.Fprintf(&sb, "🔗 Full review (risk list + RAG-retrieved context): https://lgtm-alpha.vercel.app/review/%s\n", reviewID)
 	}
-	sb.WriteString("\n<sub>由 LGTM 自动生成。push 新 commit 会自动重评；评论 `/lgtm review` 手动触发；`/lgtm help` 看更多命令</sub>")
+	sb.WriteString("\n<sub>Posted automatically by LGTM. Pushing a new commit triggers a re-review; comment `/lgtm review` to trigger one manually; `/lgtm help` for more commands</sub>")
 	return sb.String()
 }
 
