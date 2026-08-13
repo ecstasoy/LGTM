@@ -43,7 +43,7 @@ var suggestionsSystemByLocale = map[i18n.Locale]string{
 type SuggestionsStage struct {
 	Model       string
 	Temperature float32
-	Locale      i18n.Locale // 输出语言；zero value 会导致模板 / system 串查不到，调用方必须显式传
+	Locale      i18n.Locale // Output language; a zero value fails template/system lookup, so callers must set it explicitly.
 }
 
 func (SuggestionsStage) Name() string { return "suggestions" }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
@@ -18,7 +19,7 @@ func seedSteerReview(t *testing.T, s store.Store) string {
 	payload, _ := json.Marshal(cachedPayload{
 		Title:   "fix race",
 		BaseRef: "main", HeadRef: "fix/race",
-		Stats:   gh.Stats{Files: 1, Additions: 5, Deletions: 2},
+		Stats: gh.Stats{Files: 1, Additions: 5, Deletions: 2},
 		Files: []gh.File{
 			{Path: "main.go", Status: "modified", Patch: "@@ -1,3 +1,5 @@\n+x := 1\n", Additions: 5, Deletions: 2},
 		},
@@ -117,5 +118,74 @@ func TestSteer_Suggestions_EmitsSteeredSuggestionsDone(t *testing.T) {
 	}
 	if !strings.Contains(body, "steered_suggestions_done") {
 		t.Errorf("expected steered_suggestions_done in body, got %s", body)
+	}
+}
+
+// TestBuildAgentSystemPrompt_BaseByLocale pins the exact assembled prompt (no optional fragments) for each
+// locale, independent of agentSystemByLocale itself (expected strings are hardcoded here, not looked up from the
+// map), so a typo'd or removed map entry fails this test instead of compiling away silently.
+// PostSteer's mode=agent path currently hardcodes locale to i18n.ZH (Deps carries no locale field yet — see the
+// TODO in PostSteer), so this exercises buildAgentSystemPrompt directly rather than the full HTTP handler; going
+// through PostSteer cannot reach the EN branch without either faking a Deps locale field that does not exist yet
+// or monkey-patching production code, neither of which belongs in this task.
+func TestBuildAgentSystemPrompt_BaseByLocale(t *testing.T) {
+	wantZH := "你是 code reviewer agent。回答 PR 相关问题。\n\n" +
+		"## 关键：先看「相关代码」段\n" +
+		"prompt 末尾「## 相关代码（跨文件 RAG 召回）」段已是基于用户问题语义召回的本仓库相关代码（可能来自本 PR 也可能来自 main 上未在本 PR 改动的文件）。" +
+		"**如果该段已包含足以回答问题的内容，直接基于它给答案，不要调工具。**\n\n" +
+		"## 工具\n" +
+		"- `read_file` / `list_dir` / `grep_patches`：仅限**本 PR 改动文件**沙盒，跨出会被拒绝。" +
+		"\n\n## 输出\n" +
+		"用一段简洁中文文字回答（不要 JSON）。优先引用具体文件路径 + 行为，让读者能直接定位。"
+	wantEN := "You are a code reviewer agent. Answer PR-related questions.\n\n" +
+		"## Key: check the \"Related code\" section first\n" +
+		"The end of the prompt has a \"## Related code (cross-file RAG retrieval)\" section, already retrieved by semantic search against the user's question (it may come from this PR or from files on main that this PR did not touch). " +
+		"**If that section already contains enough to answer, answer from it directly — do not call a tool.**\n\n" +
+		"## Tools\n" +
+		"- `read_file` / `list_dir` / `grep_patches`: sandboxed to **files this PR changed** only; anything outside is rejected." +
+		"\n\n## Output\n" +
+		"Answer in a concise paragraph of English (no JSON). Prefer citing concrete file paths and what happens there, so the reader can go straight to it."
+
+	cases := []struct {
+		locale i18n.Locale
+		want   string
+	}{
+		{i18n.ZH, wantZH},
+		{i18n.EN, wantEN},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.locale), func(t *testing.T) {
+			got := buildAgentSystemPrompt(tc.locale, false, false)
+			if got != tc.want {
+				t.Errorf("buildAgentSystemPrompt(%s, false, false) =\n%q\nwant\n%q", tc.locale, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildAgentSystemPrompt_OptionalFragments checks the search_repo / conversation-history fragments are
+// appended only when requested, and only in the requested locale (no cross-locale leakage).
+func TestBuildAgentSystemPrompt_OptionalFragments(t *testing.T) {
+	base := buildAgentSystemPrompt(i18n.EN, false, false)
+	if strings.Contains(base, "search_repo") {
+		t.Errorf("base EN prompt should not mention search_repo, got %q", base)
+	}
+	if strings.Contains(base, "Conversation history") {
+		t.Errorf("base EN prompt should not mention conversation history, got %q", base)
+	}
+
+	withSearch := buildAgentSystemPrompt(i18n.EN, true, false)
+	if !strings.Contains(withSearch, "`search_repo`: semantic search over the whole-repo RAG index") {
+		t.Errorf("EN prompt with hasSearchRepo=true should mention search_repo, got %q", withSearch)
+	}
+
+	withHistory := buildAgentSystemPrompt(i18n.EN, false, true)
+	if !strings.Contains(withHistory, "## Conversation history") {
+		t.Errorf("EN prompt with hasHistory=true should mention conversation history, got %q", withHistory)
+	}
+
+	withSearchZH := buildAgentSystemPrompt(i18n.ZH, true, false)
+	if !strings.Contains(withSearchZH, "search_repo") || strings.Contains(withSearchZH, "whole-repo RAG index") {
+		t.Errorf("ZH prompt with hasSearchRepo=true should mention search_repo in Chinese, not English, got %q", withSearchZH)
 	}
 }

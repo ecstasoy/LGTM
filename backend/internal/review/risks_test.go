@@ -105,6 +105,37 @@ func TestRisksStage_Run_MalformedJSON(t *testing.T) {
 	}
 }
 
+// TestRisksStage_Run_SystemPromptByLocale pins the exact System string MockProvider.Stream receives for each
+// locale, independent of risksSystemByLocale itself (expected strings are hardcoded here, not looked up from the
+// map), so a typo'd or removed map entry fails this test instead of compiling away silently.
+func TestRisksStage_Run_SystemPromptByLocale(t *testing.T) {
+	cases := []struct {
+		locale i18n.Locale
+		want   string
+	}{
+		{i18n.ZH, "你是一位 code reviewer，仅按要求输出严格 JSON。"},
+		{i18n.EN, "You are a code reviewer. Emit strict JSON exactly as specified, nothing else."},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.locale), func(t *testing.T) {
+			p := llm.NewMockProvider()
+			p.Reply = `{"risks":[]}`
+			ch, err := RisksStage{Locale: tc.locale}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			drainRisks(t, ch)
+			got := p.LastRequest()
+			if got == nil {
+				t.Fatal("LastRequest() = nil; Stream was never called")
+			}
+			if got.System != tc.want {
+				t.Errorf("System = %q, want %q", got.System, tc.want)
+			}
+		})
+	}
+}
+
 func TestRisksStage_Run_StreamError(t *testing.T) {
 	_, err := RisksStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, errProvider{err: streamErr{msg: "stream failed"}})
 	if err == nil {

@@ -60,8 +60,24 @@ var agentSystemByLocale = map[i18n.Locale]struct {
 			"You and the user have already exchanged several turns (the messages below alternate user/assistant history). " +
 			"Keep continuity when answering — if the user says \"that\", \"it\", or \"the thing mentioned above\", resolve it to the concrete object from history.",
 		Output: "\n\n## Output\n" +
-			"Answer in a concise paragraph of English (no JSON). Prefer citing concrete file paths and line numbers so the reader can go straight there.",
+			"Answer in a concise paragraph of English (no JSON). Prefer citing concrete file paths and what happens there, so the reader can go straight to it.",
 	},
+}
+
+// buildAgentSystemPrompt assembles the agent's system prompt for one locale, appending the SearchRepoTool /
+// History fragments only when they apply. Extracted out of PostSteer's inline assembly so it can be
+// unit-tested directly, without exercising the full HTTP handler (store, builder, agent registry, SSE writer).
+func buildAgentSystemPrompt(locale i18n.Locale, hasSearchRepo, hasHistory bool) string {
+	frag := agentSystemByLocale[locale]
+	sysPrompt := frag.Intro + frag.KeyHint + frag.Tools
+	if hasSearchRepo {
+		sysPrompt += frag.SearchRepoTool
+	}
+	if hasHistory {
+		sysPrompt += frag.History
+	}
+	sysPrompt += frag.Output
+	return sysPrompt
 }
 
 // Allowlist of stages a steer may rerun. Rerunning summary pays off poorly (expensive, and follow-ups are mostly about risks / suggestions), so it stays closed for now.
@@ -246,15 +262,7 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			// PR sandbox tools + optional search_repo (depending on whether a retriever was injected)
 			// TODO(next i18n task): resolve locale from the request instead of hardcoding ZH; Deps carries no locale yet.
 			locale := i18n.ZH
-			frag := agentSystemByLocale[locale]
-			sysPrompt := frag.Intro + frag.KeyHint + frag.Tools
-			if hasSearchRepo {
-				sysPrompt += frag.SearchRepoTool
-			}
-			if len(priorTurns) > 0 {
-				sysPrompt += frag.History
-			}
-			sysPrompt += frag.Output
+			sysPrompt := buildAgentSystemPrompt(locale, hasSearchRepo, len(priorTurns) > 0)
 			userPrompt := buildAgentUserPrompt(pr, text, pCtx)
 
 			// assemble messages: sys + history (alternating user/assistant) + the current user turn

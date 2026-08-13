@@ -439,8 +439,8 @@ func buildPerStageContexts(
 
 // newStage builds the review.Stage matching name and injects that stage's model (an empty model means the provider default).
 // ok=false means the stage name is unknown. The steer rerun path reuses this same per-stage model routing.
-// Locale is hardcoded to i18n.ZH here to preserve today's all-Chinese behavior; per-request locale resolution
-// (body / Accept-Language / DEFAULT_LOCALE) is threaded in by a later task.
+// TODO(next i18n task): Locale is hardcoded to i18n.ZH here to preserve today's all-Chinese behavior; per-request
+// locale resolution (body / Accept-Language / DEFAULT_LOCALE) is threaded in by a later task.
 func newStage(name, model string) (review.Stage, bool) {
 	switch name {
 	case "summary":

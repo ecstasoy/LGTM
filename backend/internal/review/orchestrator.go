@@ -28,7 +28,7 @@ type Stage interface {
 type Orchestrator struct {
 	Provider llm.Provider
 	Builder  prctx.Builder
-	Locale   i18n.Locale // 透传给默认 stage 集合的 Locale 字段，决定 system 串与模板语言
+	Locale   i18n.Locale // Passed to each default stage's Locale field; picks the system-prompt and template language.
 	Stages   []Stage     // 默认 [SummaryStage{Locale: o.Locale}, RisksStage{Locale: o.Locale}, SuggestionsStage{Locale: o.Locale}]
 }
 

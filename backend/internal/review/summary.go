@@ -22,7 +22,7 @@ var summarySystemByLocale = map[i18n.Locale]string{
 type SummaryStage struct {
 	Model       string      // 覆盖 provider 默认 model；空串走默认
 	Temperature float32     // 0 走 provider 默认
-	Locale      i18n.Locale // 输出语言；zero value 会导致模板 / system 串查不到，调用方必须显式传
+	Locale      i18n.Locale // Output language; a zero value fails template/system lookup, so callers must set it explicitly.
 }
 
 // Name 实现 Stage
