@@ -78,6 +78,7 @@ export const en: Dict = {
     minutesAgo: (n: number) => `${n}m ago`,
     hoursAgo: (n: number) => `${n}h ago`,
     daysAgo: (n: number) => `${n}d ago`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "en-US",
   },
   home: {
@@ -108,6 +109,7 @@ export const en: Dict = {
     minutesAgo: (n: number) => `${n}m ago`,
     hoursAgo: (n: number) => `${n}h ago`,
     daysAgo: (n: number) => `${n}d ago`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "en-US",
   },
   userMenu: {
@@ -204,6 +206,10 @@ export const en: Dict = {
     adoptedChipLabel: (n: number, total: number) => `${n}/${total} adopted`,
     inlineSuggestionsHeading: (n: number) => `Inline suggestions (${n})`,
     suggestionCountBadge: (n: number) => (n === 1 ? "1 suggestion" : `${n} suggestions`),
+    generatedInOtherLocale: (language: string) =>
+      `This review was generated in ${language}; the text is shown as written.`,
+    languageNameZh: "Chinese",
+    languageNameEn: "English",
   },
   agent: {
     sessionTitle: (owner: string, repo: string, pr: number) => `Review ${owner}/${repo}#${pr}`,
@@ -306,6 +312,28 @@ export const en: Dict = {
     notFoundTitle: "Page not found",
     notFoundBody: "The URL may be mistyped, or this review may have been deleted.",
     browseHistory: "Browse history",
+    // Keep this key set identical to zh.ts's byCode — see the comment there for why the type
+    // annotation is required, and byCode.test.ts for the test that enforces the parity TypeScript
+    // can no longer check here.
+    byCode: {
+      not_logged_in: "Sign in first",
+      oauth_not_configured: "GitHub OAuth is not configured",
+      unknown_model: "Unknown model",
+      pr_not_found: "PR not found, or the repository is private",
+      github_forbidden: "GitHub denied the request (rate limited or insufficient permissions)",
+      no_push_permission: "No push permission (write or admin required)",
+      no_comment_permission: "No comment permission (triage, write, or admin required)",
+      suggestion_missing_anchor: "This suggestion has no file or line, so it cannot be anchored to the PR diff",
+      suggestion_missing_patch: "This suggestion has no committable change — use the Comment button to post it as plain text",
+      empty_pr: "This PR has no reviewable file changes",
+      history_login_required: "Sign in to view review history",
+      not_review_owner: "You can only delete reviews you created",
+      agent_max_steps:
+        "The agent ran out of steps without reaching an answer. It may be re-reading files this PR didn't change. Try asking more specifically — name a file or a function.",
+      steer_rerunning_risks: "Rerunning the risks stage with your steer…",
+      steer_rerunning_suggestions: "Rerunning the suggestions stage with your steer…",
+      rate_limited: "Too many requests — please try again shortly",
+    } as Record<string, string>,
   },
   ui: {
     loadingLabel: "Loading",

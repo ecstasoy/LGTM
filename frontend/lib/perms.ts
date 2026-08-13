@@ -9,7 +9,11 @@ export interface PermsResponse {
   permission?: string;
   can_comment: boolean;
   can_commit: boolean;
+  // reason is the backend's raw prose, always Chinese. Render reason_code through the dictionary and
+  // keep reason only as the fallback: the GitHub-perms-fetch-failure branch carries a dynamic upstream
+  // message with no code (see backend/internal/api/perms.go).
   reason?: string;
+  reason_code?: string;
 }
 
 // usePerms fetches the current user's permissions for the given repo; skips the fetch when owner/repo is empty.

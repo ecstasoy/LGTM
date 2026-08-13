@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { PrMeta, Suggestion } from "@/lib/types";
+import { ApiError } from "@/lib/errors";
 import type { PermsResponse } from "@/lib/perms";
 import { useT } from "@/lib/i18n/context";
 
@@ -29,6 +30,8 @@ interface AdoptContextValue {
   // suggestions 完整列表；InlineSuggestion 用 findIndex 找自己 idx
   // 必须用对象身份比较，所以 caller 必须传同一个引用（不要每次 map 出新数组）
   suggestions: Suggestion[];
+  // All three reject with ApiError carrying the backend's `code`; callers must resolve copy through
+  // friendlyError rather than rendering `.message`, which is always Chinese.
   // postComment 找到 idx 后调 /api/review/:id/comment/:idx
   postComment: (s: Suggestion) => Promise<AdoptResult>;
   // postCommit 占位；G6c PR 实装
@@ -132,9 +135,9 @@ export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestio
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string } & AdoptResult;
+      const data = (await res.json()) as { error?: string; code?: string } & AdoptResult;
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
+        throw new ApiError(data.error || `HTTP ${res.status}`, data.code);
       }
       return data;
     },
@@ -150,9 +153,9 @@ export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestio
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string } & AdoptResult;
+      const data = (await res.json()) as { error?: string; code?: string } & AdoptResult;
       if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
+        throw new ApiError(data.error || `HTTP ${res.status}`, data.code);
       }
       // 200 + ok=false：comment 上了但 apply 失败（不抛错，让 caller 区分两态显示）
       return data;
@@ -167,8 +170,8 @@ export function AdoptProvider({ reviewId, prMeta, perms, permsLoading, suggestio
         method: "DELETE",
         credentials: "include",
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+      if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, data.code);
     },
     [reviewId, t],
   );

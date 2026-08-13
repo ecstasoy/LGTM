@@ -1,4 +1,6 @@
 import type { Dict } from "./i18n/dictionaries/zh";
+import type { Locale } from "./i18n/locale";
+import { ApiError } from "./errors";
 import type {
   AgentToolCall,
   BudgetReport,
@@ -34,8 +36,16 @@ export interface StreamCallbacks {
   onToolCallStart?: (call: AgentToolCall) => void;
   onToolCallDone?: (call: AgentToolCall) => void;
   onAgentTextDelta?: (delta: string) => void;
-  onInfo?: (message: string) => void;
-  onStageError?: (stage: string, message: string) => void;
+  // agent_reply: the agent loop's final answer, as structured fields (Task 19) rather than the
+  // baked-in-Chinese "Agent 完成（N 步）：..." string the legacy `info` frame still carries.
+  onAgentReply?: (steps: number, output: string) => void;
+  // code (optional): the backend's stable machine-readable code for this info frame, if any (e.g.
+  // review.go's empty_pr notice). Consumers should resolve display text through friendlyError(message,
+  // t, code) rather than rendering `message` raw, so a coded info frame still localizes.
+  onInfo?: (message: string, code?: string) => void;
+  // code (optional): same contract as onInfo's — resolve display text through friendlyError(message,
+  // t, code), never render `message` raw (e.g. steer.go's agent_max_steps hint).
+  onStageError?: (stage: string, message: string, code?: string) => void;
   onStageDone?: (stage: string) => void;
   onDone?: () => void;
   // review_id: sent by the backend once a streamed review has persisted; the frontend uses it to
@@ -67,26 +77,33 @@ export class SSETimeoutError extends Error {
 export type SteerMode = "stage" | "agent";
 
 // streamSteer POSTs /api/review/:id/steer to rerun a stage or run the agent loop.
-// Dispatches SSE frames the same way as streamReview; a synchronous 4xx/5xx throws directly.
+// Dispatches SSE frames the same way as streamReview; a synchronous 4xx/5xx throws an ApiError
+// directly. `locale` is sent for the same reason streamReview sends it: backend/internal/api/steer.go
+// resolves body.Locale through the same resolveLocale chain as the review endpoint, and the frontend's
+// active locale (its own cookie) is independent of the browser's Accept-Language fallback — without
+// this, a user who toggles the in-app language mid-session gets agent replies / reruns back in
+// whichever language Accept-Language happens to negotiate, a second locale-resolution path this task
+// exists to collapse into one source of truth.
 export async function streamSteer(
   reviewId: string,
   text: string,
   stage: "risks" | "suggestions",
   cb: StreamCallbacks,
   t: DictRef,
+  locale: Locale,
   signal?: AbortSignal,
   mode: SteerMode = "stage",
 ): Promise<void> {
   const res = await fetch(`/api/review/${encodeURIComponent(reviewId)}/steer`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, stage, mode }),
+    body: JSON.stringify({ text, stage, mode, locale }),
     signal,
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    const msg = (data as { error?: string }).error ?? `HTTP ${res.status}`;
-    throw new Error(msg);
+    const { error, code } = data as { error?: string; code?: string };
+    throw new ApiError(error ?? `HTTP ${res.status}`, code);
   }
   if (!res.body) {
     throw new Error(t.current.errors.emptyResponseBody);
@@ -95,16 +112,24 @@ export async function streamSteer(
 }
 
 // streamReview POSTs /api/review and dispatches the resulting SSE frames to the matching callback.
-// A synchronous 4xx/5xx throws directly; per-stage errors within the stream go through onStageError.
+// A synchronous 4xx/5xx throws an ApiError directly; per-stage errors within the stream go through
+// onStageError. `locale` is sent so the backend renders stage output (and its own error strings) in
+// the tab's active language; the backend falls back to Accept-Language then DEFAULT_LOCALE if omitted.
 export async function streamReview(
   url: string,
   cb: StreamCallbacks,
   t: DictRef,
+  locale: Locale,
   signal?: AbortSignal,
   model?: string,
   stageModels?: Record<string, string>,
 ): Promise<void> {
-  const payload: { url: string; model?: string; stage_models?: Record<string, string> } = { url };
+  const payload: {
+    url: string;
+    model?: string;
+    stage_models?: Record<string, string>;
+    locale: Locale;
+  } = { url, locale };
   if (model) payload.model = model;
   if (stageModels && Object.keys(stageModels).length > 0) payload.stage_models = stageModels;
   const res = await fetch("/api/review", {
@@ -115,8 +140,8 @@ export async function streamReview(
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    const msg = (data as { error?: string }).error ?? `HTTP ${res.status}`;
-    throw new Error(msg);
+    const { error, code } = data as { error?: string; code?: string };
+    throw new ApiError(error ?? `HTTP ${res.status}`, code);
   }
   if (!res.body) {
     throw new Error(t.current.errors.emptyResponseBody);
@@ -239,14 +264,19 @@ function dispatch(ev: ParsedFrame, cb: StreamCallbacks): void {
       if (p.delta) cb.onAgentTextDelta?.(p.delta);
       break;
     }
+    case "agent_reply": {
+      const p = parsed as { steps?: number; output?: string };
+      if (p.output) cb.onAgentReply?.(p.steps ?? 0, p.output);
+      break;
+    }
     case "info": {
-      const p = parsed as { message?: string };
-      if (p.message) cb.onInfo?.(p.message);
+      const p = parsed as { message?: string; code?: string };
+      if (p.message) cb.onInfo?.(p.message, p.code);
       break;
     }
     case "error": {
-      const p = parsed as { stage?: string; message?: string };
-      cb.onStageError?.(p.stage ?? "?", p.message ?? "");
+      const p = parsed as { stage?: string; message?: string; code?: string };
+      cb.onStageError?.(p.stage ?? "?", p.message ?? "", p.code);
       break;
     }
     case "review_id": {

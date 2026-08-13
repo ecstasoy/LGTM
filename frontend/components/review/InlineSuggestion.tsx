@@ -6,6 +6,7 @@ import { Check, Clipboard, ExternalLink, GitCommit, MessageSquare, Sparkle, X } 
 import type { Suggestion } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { signInURL } from "@/lib/auth";
+import { ApiError, friendlyError } from "@/lib/errors";
 import { CategoryBadge, type Category } from "@/components/ui/badge";
 import { useAdopt } from "./AdoptContext";
 import { useT } from "@/lib/i18n/context";
@@ -21,7 +22,9 @@ type ActionState =
   | { kind: "done"; url: string; commentID?: number; commitSHA?: string; halfDone?: boolean; halfDoneReason?: string }
   | { kind: "undoing" }
   | { kind: "undone" }
-  | { kind: "error"; msg: string };
+  // code: the backend's stable error code (see backend/internal/api/errcode.go), kept alongside the
+  // raw message so the render site can resolve localized copy instead of printing the Chinese message.
+  | { kind: "error"; msg: string; code?: string };
 
 // InlineSuggestion 行内建议气泡（DiffView 内嵌锚定到对应代码行）
 // 严格对齐 design 原型 Diff.jsx 的 InlineSuggestion：surface-2 底 + 左 padding 50px
@@ -54,7 +57,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
       setComment({ kind: "done", url: r.html_url ?? "", commentID: r.comment_id });
       adopt.markAdopted(suggestion);
     } catch (e) {
-      setComment({ kind: "error", msg: e instanceof Error ? e.message : String(e) });
+      setComment(toErrorState(e));
     }
   }
 
@@ -67,7 +70,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
       setComment({ kind: "undone" });
       adopt.markUnadopted(suggestion);
     } catch (e) {
-      setComment({ kind: "error", msg: e instanceof Error ? e.message : String(e) });
+      setComment(toErrorState(e));
     }
   }
 
@@ -86,7 +89,7 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
       // commit 算采纳；half-done 也算（comment 上 PR 了）
       adopt.markAdopted(suggestion);
     } catch (e) {
-      setCommit({ kind: "error", msg: e instanceof Error ? e.message : String(e) });
+      setCommit(toErrorState(e));
     }
   }
 
@@ -108,12 +111,19 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
   // commit 在 PR 已 merged / closed 时强制禁，无视 perm
   const commitEnabled = !prInactive && reviewReady && authenticated && (perms?.can_commit ?? false);
 
+  // permsReason resolves /api/perms' reason_code through the dictionary; perms.reason itself is the
+  // backend's Chinese prose and is only the fallback for the codeless branch (GitHub perms fetch failed).
+  function permsReason(): string {
+    if (!perms?.reason) return "";
+    const code = perms.reason_code;
+    return (code ? t.errors.byCode[code] : undefined) ?? perms.reason;
+  }
+
   // tooltip 文案：按状态优先级返
   function disableReason(): string {
     if (!reviewReady) return t.review.reviewSavingHint;
     if (!authenticated) return t.review.signInToPostHint;
-    if (perms?.reason) return perms.reason;
-    return "";
+    return permsReason();
   }
 
   function commitDisableReason(): string {
@@ -121,9 +131,13 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
     if (prClosed) return t.review.prClosedCommitDisabledReason;
     if (!reviewReady) return disableReason();
     if (!authenticated) return t.review.signInToCommitHint;
-    if (!(perms?.can_commit)) return perms?.reason || t.review.noPushPermissionReason;
+    if (!(perms?.can_commit)) return permsReason() || t.review.noPushPermissionReason;
     return "";
   }
+
+  // Adopt failures carry the backend's code; resolve once here so the tooltip and the visible line agree.
+  const commentError = comment.kind === "error" ? friendlyError(comment.msg, t, comment.code) : "";
+  const commitError = commit.kind === "error" ? friendlyError(commit.msg, t, commit.code) : "";
 
   return (
     <div className="animate-fade-up border-y border-border bg-surface-2 py-2.5 pl-[50px] pr-3.5">
@@ -279,8 +293,8 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
         </p>
       ) : null}
       {comment.kind === "error" ? (
-        <p className="mt-2 text-[11px] text-high" title={comment.msg}>
-          {t.review.commentActionFailedPrefix(comment.msg)}
+        <p className="mt-2 text-[11px] text-high" title={commentError}>
+          {t.review.commentActionFailedPrefix(commentError)}
         </p>
       ) : null}
 
@@ -320,12 +334,18 @@ export function InlineSuggestion({ suggestion, onCopy }: Props) {
         </p>
       ) : null}
       {commit.kind === "error" ? (
-        <p className="mt-2 text-[11px] text-high" title={commit.msg}>
-          {t.review.commitActionFailedPrefix(commit.msg)}
+        <p className="mt-2 text-[11px] text-high" title={commitError}>
+          {t.review.commitActionFailedPrefix(commitError)}
         </p>
       ) : null}
     </div>
   );
+}
+
+// toErrorState keeps ApiError's code with the message so the render site can localize it.
+function toErrorState(e: unknown): ActionState {
+  if (e instanceof ApiError) return { kind: "error", msg: e.message, code: e.code };
+  return { kind: "error", msg: e instanceof Error ? e.message : String(e) };
 }
 
 // formatAsMarkdown 把建议格式化成可直接照搬进 GitHub PR comment 的 markdown

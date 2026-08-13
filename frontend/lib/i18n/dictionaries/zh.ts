@@ -74,6 +74,7 @@ export const zh = {
     minutesAgo: (n: number) => `${n} 分钟前`,
     hoursAgo: (n: number) => `${n} 小时前`,
     daysAgo: (n: number) => `${n} 天前`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "zh-CN",
   },
   home: {
@@ -103,6 +104,7 @@ export const zh = {
     minutesAgo: (n: number) => `${n} 分钟前`,
     hoursAgo: (n: number) => `${n} 小时前`,
     daysAgo: (n: number) => `${n} 天前`,
+    // dateLocale is a machine value: a BCP 47 tag passed to toLocaleDateString, not display copy. Translating it breaks date formatting silently.
     dateLocale: "zh-CN",
   },
   userMenu: {
@@ -190,6 +192,9 @@ export const zh = {
     adoptedChipLabel: (n: number, total: number) => `采纳 ${n}/${total}`,
     inlineSuggestionsHeading: (n: number) => `行内建议（${n}）`,
     suggestionCountBadge: (n: number) => `${n} 条`,
+    generatedInOtherLocale: (language: string) => `本评审生成于${language}，正文保持原样。`,
+    languageNameZh: "中文",
+    languageNameEn: "英文",
   },
   agent: {
     sessionTitle: (owner: string, repo: string, pr: number) => `评审 ${owner}/${repo}#${pr}`,
@@ -289,6 +294,31 @@ export const zh = {
     notFoundTitle: "页面不存在",
     notFoundBody: "URL 可能拼错了，或者评审记录已被删除。",
     browseHistory: "浏览历史",
+    // Keyed by backend/internal/api/errcode.go's stable string constants (+ middleware/ratelimit.go's
+    // CodeRateLimited). `as Record<string, string>` is required: without it, `typeof zh` would lock this
+    // key set into a literal union, and every future backend code would need a matching frontend PR just
+    // to keep `en.ts` compiling. The cost is that this is the ONE namespace outside the `Dict` guard:
+    // adding a key here alone still compiles, and friendlyError then serves generic copy for it.
+    // byCode.test.ts pins the two key sets equal so the half-added case fails the suite instead.
+    byCode: {
+      not_logged_in: "请先登录",
+      oauth_not_configured: "GitHub OAuth 未配置",
+      unknown_model: "未知模型",
+      pr_not_found: "PR 不存在或为私有仓库",
+      github_forbidden: "GitHub 拒绝访问（速率限制或权限不足）",
+      no_push_permission: "无 push 权限（需 write / admin）",
+      no_comment_permission: "无评论权限（需 triage / write / admin）",
+      suggestion_missing_anchor: "该建议缺少文件或行号，无法定位到 PR diff",
+      suggestion_missing_patch: "该建议没有可提交的改动，请改用「评论」按钮发纯文字建议",
+      empty_pr: "该 PR 无可评审的文件改动",
+      history_login_required: "请先登录后查看评审历史",
+      not_review_owner: "只能删除你创建的评审",
+      agent_max_steps:
+        "Agent 用尽步数仍未给出答案。可能是工具反复访问本 PR 没改的文件。把问题问得更具体些（含文件名 / 函数名）再试。",
+      steer_rerunning_risks: "正在按引导重跑风险阶段…",
+      steer_rerunning_suggestions: "正在按引导重跑建议阶段…",
+      rate_limited: "请求过于频繁，请稍后再试",
+    } as Record<string, string>,
   },
   ui: {
     loadingLabel: "加载中",

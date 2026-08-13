@@ -27,11 +27,12 @@ import type {
   Suggestion,
 } from "@/lib/types";
 import { streamSteer, type SteerMode } from "@/lib/sse";
+import { ApiError, friendlyError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { FileStatusBadge } from "@/components/ui/file-status-badge";
 import { SeverityBadge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
 import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 type StepStatus = "pending" | "running" | "done" | "error";
@@ -45,7 +46,7 @@ interface SteerEntry {
   status: "running" | "done" | "error";
   resultCount?: number;
   error?: string;
-  // agent 模式：后端发的「Agent 完成（N 步）：...」最终回复正文 + 步数
+  // agent 模式：agent_reply SSE 帧的 output + steps
   // 之前路由到页面顶部 InfoBanner，太远离 timeline；现在挂在 entry 上让 SteerDetail 内联渲染 markdown
   agentResponse?: string;
   agentSteps?: number;
@@ -70,7 +71,7 @@ interface Props {
   onSteeredSuggestions?: (suggestions: Suggestion[]) => void;
   onSteerToolCallStart?: (call: AgentToolCall) => void;
   onSteerToolCallDone?: (call: AgentToolCall) => void;
-  onSteerInfo?: (message: string) => void;
+  onSteerInfo?: (message: string, code?: string) => void;
   // Agent loop tool 调用事件（A3 后端 emit tool_call_start/done）
   // 按 id 已合并 start/done，状态从 running → done/error；从父级 state 流下来
   toolEvents?: ToolEvent[];
@@ -150,6 +151,7 @@ export function AgentSessionView({
   toolEvents,
 }: Props) {
   const t = useT();
+  const locale = useLocale();
   // Mutated on every render, read only when streamSteer's async path actually throws — so an
   // in-flight steer request picks up a locale change without needing to be restarted.
   const tRef = useRef(t);
@@ -209,30 +211,38 @@ export function AgentSessionView({
             },
             onToolCallStart: (call) => onSteerToolCallStart?.(call),
             onToolCallDone: (call) => onSteerToolCallDone?.(call),
-            onInfo: (message) => {
-              // agent 路径 backend 发两条 info：「Agent 启动...」+「Agent 完成（N 步）：BODY」
-              // 都挂到当前 entry 上，不要污染页面顶部 InfoBanner（远离 timeline 失去上下文）
-              const finishMatch = message.match(/^Agent 完成（(\d+) 步）：(.*)$/s);
-              if (finishMatch) {
-                const steps = parseInt(finishMatch[1], 10);
-                const body = finishMatch[2].trim();
-                setSteerHistory((prev) =>
-                  prev.map((e) =>
-                    e.id === id ? { ...e, agentResponse: body, agentSteps: steps } : e,
-                  ),
-                );
-                return;
-              }
-              if (message.startsWith("Agent 启动")) {
-                // 启动信息已经被 running 状态隐含；丢弃避免重复显示
-                return;
-              }
-              // 其它 info（如「评审保存中…」/ "stage error" 提示）保留页面级 InfoBanner 路径
-              onSteerInfo?.(message);
+            // agent_reply (Task 19): the completion payload as structured fields, not parsed out of
+            // the legacy info string below. Attached straight to this entry — SteerDetail renders it
+            // inline, not the page-top InfoBanner (which would put it out of reach of the timeline).
+            onAgentReply: (steps, output) => {
+              setSteerHistory((prev) =>
+                prev.map((e) =>
+                  e.id === id ? { ...e, agentResponse: output, agentSteps: steps } : e,
+                ),
+              );
             },
-            onStageError: (_s, msg) => markError(msg),
+            onInfo: (message, code) => {
+              if (message.startsWith("Agent 启动")) {
+                // GAP (follow-up needed): the backend has no structured equivalent for this startup
+                // notice yet — see backend/internal/api/steer.go's first writeSSE(..., "info", ...)
+                // call in the mode=="agent" branch. Matching on the Chinese text is the same
+                // anti-pattern agent_reply above exists to remove; it survives here only because
+                // there is nothing else to key off. Safe to drop regardless: the entry's "running"
+                // status already conveys that the agent has started.
+                return;
+              }
+              // Agent mode's only other info frame is the legacy completion notice (steer.go's
+              // second writeSSE(..., "info", ...) call), now fully superseded by agent_reply above.
+              // Dropped structurally by mode rather than by matching its text.
+              if (mode === "agent") return;
+              // stage mode's own status line carries steer_rerunning_{risks,suggestions}; forwarded
+              // with its code so the caller resolves localized copy through friendlyError.
+              onSteerInfo?.(message, code);
+            },
+            onStageError: (_s, msg, code) => markError(friendlyError(msg, tRef.current, code)),
           },
           tRef,
+          locale,
           undefined,
           mode,
         );
@@ -248,7 +258,13 @@ export function AgentSessionView({
           ),
         );
       } catch (e) {
-        markError(e instanceof Error ? e.message : String(e));
+        markError(
+          friendlyError(
+            e instanceof Error ? e.message : String(e),
+            tRef.current,
+            e instanceof ApiError ? e.code : undefined,
+          ),
+        );
       } finally {
         steerInFlightRef.current = false;
         setSteerInFlight(false);
@@ -256,6 +272,7 @@ export function AgentSessionView({
     },
     [
       reviewId,
+      locale,
       onSteeredRisks,
       onSteeredSuggestions,
       onSteerInfo,

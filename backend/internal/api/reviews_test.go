@@ -363,6 +363,96 @@ func TestGetReview_IncludesLang(t *testing.T) {
 	}
 }
 
+// TestGetReview_IncludesLocale confirms a review persisted with a locale surfaces it unchanged
+// through the detail endpoint (Task 22).
+func TestGetReview_IncludesLocale(t *testing.T) {
+	s := newTestStore(t)
+	payload, _ := json.Marshal(cachedPayload{
+		Title:       "fix race",
+		Locale:      "en",
+		Summary:     "summary text",
+		Risks:       json.RawMessage(`[]`),
+		Suggestions: json.RawMessage(`[]`),
+	})
+	id := store.NewID()
+	rec := &store.Record{
+		ID: id, Owner: "golang", Repo: "go", PRNumber: 42, HeadSHA: "deadbeef",
+		Locale: "en", Payload: payload, CreatedAt: time.Unix(1000, 0),
+	}
+	if err := s.Put(context.Background(), rec); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	srv := startTestServer(t, Deps{Provider: llm.NewMockProvider(), Store: s})
+	res, body := getJSON(t, srv, "/api/reviews/"+id)
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+	var d map[string]any
+	_ = json.Unmarshal([]byte(body), &d)
+	if d["locale"] != "en" {
+		t.Errorf("detail.locale 应为 en，得到 %v", d["locale"])
+	}
+}
+
+// TestGetReview_AbsentPayloadLocale_NeverFabricatesZh is the backward-compatibility case that
+// matters most for Task 22: a row written before the locale field existed has no "locale" key in
+// its stored payload JSON, even though the reviews.locale *column* was backfilled to "zh" for
+// every pre-existing row (store.ensureLocaleColumn's `ALTER TABLE ... DEFAULT 'zh'`). GetReview
+// must build its response from the payload, not that column, so the detail's locale comes back
+// empty — never a fabricated "zh" — letting the frontend treat it as unknown and show no notice.
+func TestGetReview_AbsentPayloadLocale_NeverFabricatesZh(t *testing.T) {
+	s := newTestStore(t)
+	id := seedReview(t, s, "golang", "go", 1, "sha1", "legacy PR", time.Unix(1000, 0))
+
+	// Sanity-check the disagreement this test guards against: the store column reads back "zh"
+	// (Put's normalizeLocale backfill), even though seedReview's payload never set Locale.
+	rec, err := s.GetByID(context.Background(), id)
+	if err != nil || rec == nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if rec.Locale != store.DefaultLocale {
+		t.Fatalf("expected the store column to be backfilled to %q, got %q", store.DefaultLocale, rec.Locale)
+	}
+
+	srv := startTestServer(t, Deps{Provider: llm.NewMockProvider(), Store: s})
+	res, body := getJSON(t, srv, "/api/reviews/"+id)
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+	var d map[string]any
+	if err := json.Unmarshal([]byte(body), &d); err != nil {
+		t.Fatalf("decode: %v body=%s", err, body)
+	}
+	if v, ok := d["locale"]; ok && v != "" {
+		t.Errorf("a pre-i18n row's locale should be absent/empty, got %v", v)
+	}
+}
+
+// TestListReviews_AbsentPayloadLocale_NeverFabricatesZh is the list-endpoint counterpart of
+// TestGetReview_AbsentPayloadLocale_NeverFabricatesZh — the /history table must not badge a
+// pre-i18n row as Chinese either.
+func TestListReviews_AbsentPayloadLocale_NeverFabricatesZh(t *testing.T) {
+	s := newTestStore(t)
+	seedReview(t, s, "golang", "go", 1, "sha1", "legacy PR", time.Unix(1000, 0))
+
+	srv := startTestServer(t, Deps{Provider: llm.NewMockProvider(), Store: s})
+	res, body := getJSON(t, srv, "/api/reviews")
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatalf("decode: %v body=%s", err, body)
+	}
+	if len(list) != 1 {
+		t.Fatalf("应返 1 条，得到 %d", len(list))
+	}
+	if v, ok := list[0]["locale"]; ok && v != "" {
+		t.Errorf("a pre-i18n row's locale should be absent/empty, got %v", v)
+	}
+}
+
 func TestCountRisksBySeverity(t *testing.T) {
 	cases := []struct {
 		name string

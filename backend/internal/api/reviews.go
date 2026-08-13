@@ -28,17 +28,19 @@ type riskCounts struct {
 // reviewListItem is one /api/reviews list entry: meta + CI + risk counts only, no full payload.
 // Used by the landing "recent reviews" card and the dense /history table, so it is kept as small as possible.
 type reviewListItem struct {
-	ID         string     `json:"id"`
-	Owner      string     `json:"owner"`
-	Repo       string     `json:"repo"`
-	PR         int        `json:"pr"`
-	HeadSHA    string     `json:"head_sha"`
-	Title      string     `json:"title,omitempty"`
-	CreatedAt  string     `json:"created_at"`
-	CI         string     `json:"ci,omitempty"`
-	Lang       string     `json:"lang,omitempty"`       // the PR's primary language (what detectPrimaryLang returned); used by the /history language filter
-	Source     string     `json:"source,omitempty"`     // "manual" / "webhook"; the frontend renders the ⚡ chip from this
-	CreatedBy  string     `json:"created_by,omitempty"` // GitHub login; empty = anonymous leftover; the frontend gates the delete button on it
+	ID        string `json:"id"`
+	Owner     string `json:"owner"`
+	Repo      string `json:"repo"`
+	PR        int    `json:"pr"`
+	HeadSHA   string `json:"head_sha"`
+	Title     string `json:"title,omitempty"`
+	CreatedAt string `json:"created_at"`
+	CI        string `json:"ci,omitempty"`
+	Lang      string `json:"lang,omitempty"`       // the PR's primary language (what detectPrimaryLang returned); used by the /history language filter
+	Source    string `json:"source,omitempty"`     // "manual" / "webhook"; the frontend renders the ⚡ chip from this
+	CreatedBy string `json:"created_by,omitempty"` // GitHub login; empty = anonymous leftover; the frontend gates the delete button on it
+	// Locale is the review output language ("zh" | "en"), read from the cached payload, never the reviews.locale store column (see cachedPayload.Locale); empty means unknown, never "zh".
+	Locale     string     `json:"locale,omitempty"`
 	RiskCounts riskCounts `json:"risk_counts"`
 }
 
@@ -152,6 +154,7 @@ func ListReviews(d Deps) gin.HandlerFunc {
 				it.CI = p.CI
 				it.Lang = p.Lang
 				it.Source = p.Source
+				it.Locale = p.Locale
 				it.RiskCounts = countRisksBySeverity(p.Risks)
 			}
 			out = append(out, it)
@@ -258,6 +261,7 @@ func GetReview(d Deps) gin.HandlerFunc {
 				Lang:       p.Lang,
 				Source:     p.Source,
 				CreatedBy:  createdBy,
+				Locale:     p.Locale,
 				RiskCounts: countRisksBySeverity(p.Risks),
 			},
 			Files:        p.Files,

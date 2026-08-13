@@ -13,10 +13,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { streamSteer } from "@/lib/sse";
+import { ApiError, friendlyError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { Spinner } from "@/components/ui/spinner";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
 import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 // chatProse 聊天气泡内 markdown 排版：紧凑间距 + 小字号；与 SummaryCard 的宽松排版区分
@@ -48,9 +49,10 @@ interface Msg {
 
 // AgentPanel 右侧 360px 抽屉 dock：追问这个 PR。
 // 接 streamSteer mode=agent：每次提问跑 agent.Run loop；
-// SSE tool_call_start/done → 在 chat 内插 tool message；info（"Agent 完成..."）→ assistant message。
+// SSE tool_call_start/done → 在 chat 内插 tool message；agent_reply → assistant message。
 export function AgentPanel({ onClose, reviewId }: Props) {
   const t = useT();
+  const locale = useLocale();
   // The greeting is NOT seeded into msgs: it's rendered straight from t.agent.introMessage below,
   // so it re-localizes immediately if the user toggles the language while the panel stays open.
   // Persisting it into state would freeze it in whatever locale was active at mount.
@@ -138,26 +140,30 @@ export function AgentPanel({ onClose, reviewId }: Props) {
               return [...next, fallback];
             });
           },
-          onInfo: (info) => {
-            // 后端两条 info：开头是 "Agent 启动..."（忽略）；结束是 "Agent 完成（N 步）：..."（assistant）
-            const finishMatch = info.match(/^Agent 完成（\d+ 步）：(.*)$/s);
-            if (finishMatch) {
-              setMsgs((m) => [...m, { role: "assistant", text: finishMatch[1].trim() }]);
-            }
+          // agent_reply (Task 19): the completion payload as structured fields (steps/output),
+          // not parsed out of the legacy "Agent 完成（N 步）：..." info string. This panel always
+          // runs mode="agent" (see the streamSteer call below), whose only other info frame is the
+          // agent-started notice — silently ignored here too, same as before this migration.
+          onAgentReply: (_steps, output) => {
+            setMsgs((m) => [...m, { role: "assistant", text: output }]);
           },
-          onStageError: (_s, msg) => {
-            setMsgs((m) => [...m, { role: "assistant", text: `❌ ${msg}` }]);
+          onStageError: (_s, msg, code) => {
+            const resolved = friendlyError(msg, tRef.current, code);
+            setMsgs((m) => [...m, { role: "assistant", text: `❌ ${resolved}` }]);
           },
         },
         tRef,
+        locale,
         controller.signal,
         "agent",
       );
     } catch (e) {
-      setMsgs((m) => [
-        ...m,
-        { role: "assistant", text: `❌ ${e instanceof Error ? e.message : String(e)}` },
-      ]);
+      const resolved = friendlyError(
+        e instanceof Error ? e.message : String(e),
+        tRef.current,
+        e instanceof ApiError ? e.code : undefined,
+      );
+      setMsgs((m) => [...m, { role: "assistant", text: `❌ ${resolved}` }]);
     } finally {
       inFlightRef.current = false;
       setThinking(false);

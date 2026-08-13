@@ -100,6 +100,10 @@ export interface ReviewSummary {
   lang?: string; // the PR's primary programming language (Go / TypeScript / Python / …); the backend picks the majority by file extension
   source?: "manual" | "webhook"; // webhook-triggered auto review; the list renders an auto chip
   created_by?: string; // GitHub login; empty means an anonymous legacy record; the frontend uses this to gate the delete button
+  // locale is the review OUTPUT language ("zh" | "en") — not to be confused with `lang` above,
+  // which is the PR's programming language. Absent/empty means unknown (a pre-i18n record); never
+  // treat that as "zh" — see backend/internal/api/cache.go's cachedPayload.Locale.
+  locale?: "zh" | "en";
   risk_counts?: { high: number; medium: number; low: number };
 }
 
