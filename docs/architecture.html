@@ -64,12 +64,12 @@
         <div class="pulse-dot"></div>
         <h1>LGTM · PR Review Assistant 架构</h1>
       </div>
-      <p class="subtitle">GitHub PR 评审助手 — Next.js 前端 + Go 后端 · 分层上下文 (L1–L4) + RAG · LLM 三阶段并发 SSE 流式评审 · GitHub App 自动评审</p>
+      <p class="subtitle">GitHub PR 评审助手 — Next.js 前端 + Go 后端 · 分层上下文 (L1–L4) + RAG · LLM 三阶段并发 SSE 流式评审 · GitHub App 自动评审 · 界面与评审正文中英双语</p>
     </div>
 
     <!-- Main Diagram -->
     <div class="diagram-container">
-      <svg viewBox="0 0 1280 850">
+      <svg viewBox="0 0 1280 970">
         <defs>
           <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/></marker>
           <marker id="ah-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee"/></marker>
@@ -113,7 +113,7 @@
 
         <!-- Frontend rewrite -> Backend router -->
         <path d="M 412 667 L 445 667 L 445 250 L 458 250" fill="none" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah-cyan)"/>
-        <text x="451" y="430" fill="#94a3b8" font-size="8" transform="rotate(-90 451 430)" text-anchor="middle">/api/* rewrite · SSE 直连</text>
+        <text x="451" y="430" fill="#94a3b8" font-size="8" transform="rotate(-90 451 430)" text-anchor="middle">/api/* rewrite · SSE 直连 · 请求体带 locale</text>
 
         <!-- Backend -> GitHub (REST / GraphQL / App token / comment) -->
         <line x1="540" y1="190" x2="540" y2="156" stroke="#34d399" stroke-width="1.5" marker-end="url(#ah-emerald)"/>
@@ -290,7 +290,7 @@
         <rect x="996" y="468" width="248" height="62" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
         <text x="1120" y="490" fill="white" font-size="11" font-weight="600" text-anchor="middle">Store</text>
         <text x="1120" y="508" fill="#94a3b8" font-size="9" text-anchor="middle">SQLite reviews.db / Postgres</text>
-        <text x="1120" y="523" fill="#a78bfa" font-size="8" text-anchor="middle">评审历史 · head_sha 缓存回放</text>
+        <text x="1120" y="523" fill="#a78bfa" font-size="8" text-anchor="middle">评审历史 · (head_sha + locale) 缓存回放</text>
 
         <rect x="996" y="566" width="248" height="62" rx="6" fill="#0f172a"/>
         <rect x="996" y="566" width="248" height="62" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
@@ -304,30 +304,80 @@
         <text x="1120" y="704" fill="#94a3b8" font-size="9" text-anchor="middle">Redis / MemoryCache</text>
         <text x="1120" y="719" fill="#a78bfa" font-size="8" text-anchor="middle">session · 限流 · 通知 · 会话记忆</text>
 
+        <!-- ============ LOCALE CHAIN BAND (below all region boundaries) ============ -->
+        <rect x="24" y="788" width="1236" height="130" rx="12" fill="rgba(30,41,59,0.22)" stroke="#94a3b8" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="40" y="810" fill="#cbd5e1" font-size="11" font-weight="600">locale 链路 · zh / en 中英切换（LocaleToggle 写 cookie → 下一次 SSR 读 cookie）</text>
+
+        <!-- band arrows first, so the boxes below mask them -->
+        <line x1="292" y1="863" x2="324" y2="863" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <line x1="528" y1="863" x2="560" y2="863" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <line x1="804" y1="863" x2="836" y2="863" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <line x1="1040" y1="863" x2="1072" y2="863" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- ① 前端解析 -->
+        <rect x="40" y="824" width="250" height="78" rx="6" fill="#0f172a"/>
+        <rect x="40" y="824" width="250" height="78" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="165" y="846" fill="white" font-size="11" font-weight="600" text-anchor="middle">layout.tsx 解析 locale</text>
+        <text x="165" y="864" fill="#94a3b8" font-size="9" text-anchor="middle">cookie lgtm-locale → Accept-Language</text>
+        <text x="165" y="880" fill="#94a3b8" font-size="8.5" text-anchor="middle">SSR 直出 &lt;html lang&gt; + initialLocale</text>
+        <text x="165" y="895" fill="#22d3ee" font-size="8.5" text-anchor="middle">零闪烁 · 零水合错配</text>
+
+        <!-- ② 请求带 locale -->
+        <rect x="326" y="824" width="200" height="78" rx="6" fill="#0f172a"/>
+        <rect x="326" y="824" width="200" height="78" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="426" y="846" fill="white" font-size="11" font-weight="600" text-anchor="middle">请求体带 locale</text>
+        <text x="426" y="864" fill="#94a3b8" font-size="9" text-anchor="middle">POST /review · /steer</text>
+        <text x="426" y="880" fill="#94a3b8" font-size="8.5" text-anchor="middle">{ url, locale }</text>
+        <text x="426" y="895" fill="#22d3ee" font-size="8.5" text-anchor="middle">错误文案按 code 查字典</text>
+
+        <!-- ③ 后端解析 -->
+        <rect x="562" y="824" width="240" height="78" rx="6" fill="#0f172a"/>
+        <rect x="562" y="824" width="240" height="78" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="682" y="846" fill="white" font-size="11" font-weight="600" text-anchor="middle">resolveLocale 三级回退</text>
+        <text x="682" y="864" fill="#94a3b8" font-size="8.5" text-anchor="middle">请求体 → Accept-Language → DEFAULT_LOCALE</text>
+        <text x="682" y="880" fill="#94a3b8" font-size="8.5" text-anchor="middle">归一化后只剩 zh / en</text>
+        <text x="682" y="895" fill="#34d399" font-size="8.5" text-anchor="middle">webhook 无请求可协商 → 只用默认值</text>
+
+        <!-- ④ 按 locale 选模板 -->
+        <rect x="838" y="824" width="200" height="78" rx="6" fill="#0f172a"/>
+        <rect x="838" y="824" width="200" height="78" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="938" y="846" fill="white" font-size="11" font-weight="600" text-anchor="middle">按 locale 选模板</text>
+        <text x="938" y="864" fill="#94a3b8" font-size="8.5" text-anchor="middle">ParseFor(stage, locale)</text>
+        <text x="938" y="880" fill="#94a3b8" font-size="8.5" text-anchor="middle">summary.zh / summary.en.tmpl</text>
+        <text x="938" y="895" fill="#fbbf24" font-size="8.5" text-anchor="middle">System 串按 locale 取 map</text>
+
+        <!-- ⑤ 进唯一键 -->
+        <rect x="1074" y="824" width="170" height="78" rx="6" fill="#0f172a"/>
+        <rect x="1074" y="824" width="170" height="78" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="1159" y="846" fill="white" font-size="11" font-weight="600" text-anchor="middle">locale 进唯一键</text>
+        <text x="1159" y="864" fill="#94a3b8" font-size="8.5" text-anchor="middle">owner/repo/pr/head_sha</text>
+        <text x="1159" y="880" fill="#94a3b8" font-size="8.5" text-anchor="middle">+ locale</text>
+        <text x="1159" y="895" fill="#a78bfa" font-size="8.5" text-anchor="middle">中英各存一条</text>
+
         <!-- ============ LEGEND (below all boundaries) ============ -->
-        <rect x="40" y="803" width="16" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
-        <text x="62" y="811" fill="#94a3b8" font-size="9">前端 Frontend</text>
+        <rect x="40" y="944" width="16" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="62" y="952" fill="#94a3b8" font-size="9">前端 Frontend</text>
 
-        <rect x="180" y="803" width="16" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
-        <text x="202" y="811" fill="#94a3b8" font-size="9">后端 Backend</text>
+        <rect x="180" y="944" width="16" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="202" y="952" fill="#94a3b8" font-size="9">后端 Backend</text>
 
-        <rect x="320" y="803" width="16" height="10" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1"/>
-        <text x="342" y="811" fill="#94a3b8" font-size="9">存储 Database</text>
+        <rect x="320" y="944" width="16" height="10" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="342" y="952" fill="#94a3b8" font-size="9">存储 Database</text>
 
-        <rect x="460" y="803" width="16" height="10" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1"/>
-        <text x="482" y="811" fill="#94a3b8" font-size="9">AI / 云服务</text>
+        <rect x="460" y="944" width="16" height="10" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="482" y="952" fill="#94a3b8" font-size="9">AI / 云服务</text>
 
-        <rect x="600" y="803" width="16" height="10" rx="2" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1"/>
-        <text x="622" y="811" fill="#94a3b8" font-size="9">GitHub / 鉴权</text>
+        <rect x="600" y="944" width="16" height="10" rx="2" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="622" y="952" fill="#94a3b8" font-size="9">GitHub / 鉴权</text>
 
-        <rect x="740" y="803" width="16" height="10" rx="2" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1"/>
-        <text x="762" y="811" fill="#94a3b8" font-size="9">外部 / 通用</text>
+        <rect x="740" y="944" width="16" height="10" rx="2" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="762" y="952" fill="#94a3b8" font-size="9">外部 / 通用</text>
 
-        <line x1="880" y1="808" x2="908" y2="808" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <text x="914" y="811" fill="#94a3b8" font-size="9">数据 / API</text>
+        <line x1="880" y1="949" x2="908" y2="949" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <text x="914" y="952" fill="#94a3b8" font-size="9">数据 / API</text>
 
-        <line x1="1030" y1="808" x2="1058" y2="808" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/>
-        <text x="1064" y="811" fill="#94a3b8" font-size="9">鉴权 / Webhook</text>
+        <line x1="1030" y1="949" x2="1058" y2="949" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="1064" y="952" fill="#94a3b8" font-size="9">鉴权 / Webhook</text>
       </svg>
     </div>
 
@@ -338,7 +388,7 @@
         <ul>
           <li>• ① 前端 POST <code>/api/review</code> 提交 PR URL</li>
           <li>• ② 拉取 meta / diff / CI checks / 约定文档</li>
-          <li>• ③ 按 <code>owner/repo/pr/head_sha</code> 命中缓存可直接回放</li>
+          <li>• ③ 按 <code>owner/repo/pr/head_sha/locale</code> 命中缓存可直接回放</li>
           <li>• ④ 构建 L1–L4 上下文，按预算裁剪</li>
           <li>• ⑤ summary / risks / suggestions 三阶段并发</li>
           <li>• ⑥ SSE 推 <code>summary_delta · *_done · review_id</code> 并写历史</li>
@@ -366,6 +416,7 @@
           <li>• LLM: DeepSeek（OpenAI 兼容）· Embedding 独立配置</li>
           <li>• GitHub App: OAuth 登录 + webhook 自动评审</li>
           <li>• 建议回写 PR：comment → GraphQL apply 成 commit</li>
+          <li>• locale: cookie <code>lgtm-locale</code> / <code>DEFAULT_LOCALE</code>；发给 GitHub 的文案恒为英文</li>
         </ul>
       </div>
     </div>
@@ -376,7 +427,7 @@
         <div class="pulse-dot" style="background:#34d399"></div>
         <h1>分层上下文 L1–L4 · 取数 → 预算 → 拼 Prompt → LLM</h1>
       </div>
-      <p class="subtitle">PR 的四个上下文来源各自取数，经 48k token 预算裁剪后按模板拼成一个 prompt，发给 LLM 的三阶段（summary / risks / suggestions）。代码见 <code>backend/internal/prctx/layered.go</code></p>
+      <p class="subtitle">PR 的四个上下文来源各自取数，经 48k token 预算裁剪后按 locale 选中的模板拼成一个 prompt，发给 LLM 的三阶段（summary / risks / suggestions）。代码见 <code>backend/internal/prctx/layered.go</code></p>
     </div>
 
     <div class="diagram-container">
@@ -408,6 +459,9 @@
         <text x="854" y="292" fill="#94a3b8" font-size="9" text-anchor="middle">拼接</text>
         <line x1="1084" y1="300" x2="1116" y2="300" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#ph)"/>
         <text x="1100" y="292" fill="#94a3b8" font-size="9" text-anchor="middle">发送</text>
+
+        <!-- ===== locale -> prompt (which template file gets rendered) ===== -->
+        <line x1="984" y1="536" x2="984" y2="502" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ph)"/>
 
         <!-- ===== sources ===== -->
         <rect x="24" y="110" width="156" height="96" rx="6" fill="#0f172a"/>
@@ -478,7 +532,7 @@
         <rect x="884" y="110" width="200" height="388" rx="8" fill="#0f172a"/>
         <rect x="884" y="110" width="200" height="388" rx="8" fill="rgba(30,41,59,0.55)" stroke="#94a3b8" stroke-width="1.5"/>
         <text x="984" y="139" fill="white" font-size="14" font-weight="600" text-anchor="middle">拼接 Prompt</text>
-        <text x="984" y="159" fill="#94a3b8" font-size="10" text-anchor="middle">渲染进 *.tmpl</text>
+        <text x="984" y="159" fill="#94a3b8" font-size="10" text-anchor="middle">渲染进 &lt;stage&gt;.&lt;locale&gt;.tmpl</text>
         <text x="900" y="196" fill="#22d3ee" font-size="11">## PR 元信息</text>
         <text x="1068" y="196" fill="#64748b" font-size="9" text-anchor="end">← L1</text>
         <text x="900" y="228" fill="#fbbf24" font-size="11">## 项目约定</text>
@@ -490,6 +544,18 @@
         <text x="900" y="324" fill="#94a3b8" font-size="10">## 未纳入 (Dropped)</text>
         <text x="900" y="356" fill="#ffffff" font-size="11">## 任务 → 输出</text>
         <text x="984" y="384" fill="#64748b" font-size="8.5" text-anchor="middle">段落顺序即模板真实顺序</text>
+        <line x1="900" y1="402" x2="1068" y2="402" stroke="#334155" stroke-width="1"/>
+        <text x="984" y="422" fill="white" font-size="11" font-weight="600" text-anchor="middle">按 locale 选模板</text>
+        <text x="984" y="440" fill="#cbd5e1" font-size="9" text-anchor="middle">ParseFor(stage, locale)</text>
+        <text x="984" y="458" fill="#cbd5e1" font-size="9" text-anchor="middle">summary / risks / suggestions</text>
+        <text x="984" y="474" fill="#cbd5e1" font-size="9" text-anchor="middle">× zh / en = 6 个模板文件</text>
+        <text x="984" y="490" fill="#64748b" font-size="8" text-anchor="middle">两套原生正文，不用 {{.Locale}} 变量</text>
+
+        <!-- ===== locale 来源 ===== -->
+        <rect x="884" y="538" width="200" height="52" rx="6" fill="#0f172a"/>
+        <rect x="884" y="538" width="200" height="52" rx="6" fill="rgba(30,41,59,0.55)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="984" y="559" fill="white" font-size="11" font-weight="600" text-anchor="middle">locale · zh / en</text>
+        <text x="984" y="577" fill="#94a3b8" font-size="8.5" text-anchor="middle">请求体 → Accept-Language → 默认</text>
 
         <!-- ===== LLM ===== -->
         <rect x="1120" y="150" width="140" height="300" rx="8" fill="#0f172a"/>
@@ -545,7 +611,9 @@
       <div class="card">
         <div class="card-header"><div class="card-dot emerald"></div><h3>拼接与使用</h3></div>
         <ul>
-          <li>• 四层渲染进 <code>*.tmpl</code> 成一个 prompt</li>
+          <li>• 四层渲染进 <code>summary.zh.tmpl</code> 这类模板成一个 prompt</li>
+          <li>• 模板由 locale 选中：<code>ParseFor(stage, locale)</code></li>
+          <li>• 中英各一套原生正文（3 stage × 2 locale = 6 个文件）</li>
           <li>• 模板真实顺序：L1 → L3 → L4 → L2</li>
           <li>• summary/risks/suggestions 共享 L1/L2/L3</li>
           <li>• L4 各阶段用不同 query 重算召回</li>
@@ -559,7 +627,7 @@
         <div class="pulse-dot" style="background:#fb7185"></div>
         <h1>GitHub Webhook 自动评审 · 时序</h1>
       </div>
-      <p class="subtitle">pull_request.opened / synchronize / reopened（或 PR 评论 <code>/lgtm review</code>）→ HMAC 校验 → 202 立即返回 → 后台 goroutine 评审 → 回贴 bot review + 站内通知</p>
+      <p class="subtitle">pull_request.opened / synchronize / reopened（或 PR 评论 <code>/lgtm review</code>）→ HMAC 校验 → 202 立即返回 → 后台 goroutine 评审（语言取 <code>DEFAULT_LOCALE</code>）→ 回贴英文 bot review + 站内通知</p>
     </div>
 
     <div class="diagram-container">
@@ -620,7 +688,7 @@
 
         <!-- ⑦ Worker -> Store: idempotency -->
         <line x1="551" y1="384" x2="974" y2="384" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#sah-v)"/>
-        <text x="762" y="378" fill="#cbd5e1" font-size="8.5" text-anchor="middle">⑦ Store.Get(owner/repo/pr/head_sha) 幂等检查</text>
+        <text x="762" y="378" fill="#cbd5e1" font-size="8.5" text-anchor="middle">⑦ Store.Get(owner/repo/pr/head_sha + locale) 幂等检查</text>
 
         <!-- ⑧ Store -> Worker: hit/miss -->
         <line x1="974" y1="420" x2="551" y2="420" stroke="#a78bfa" stroke-width="1.3" stroke-dasharray="5,4" marker-end="url(#sah-v)"/>
@@ -649,6 +717,7 @@
         <!-- ⑭ Worker -> GitHub: bot review -->
         <line x1="539" y1="638" x2="116" y2="638" stroke="#fb7185" stroke-width="1.5" marker-end="url(#sah-r)"/>
         <text x="330" y="632" fill="#cbd5e1" font-size="8.5" text-anchor="middle">⑭ postBotReview · AppJWT→installToken→PostPRReview(summary + inline)</text>
+        <text x="330" y="654" fill="#94a3b8" font-size="8" text-anchor="middle">bot 评论全部英文 · 与 DEFAULT_LOCALE 无关（受众是 PR 参与者）</text>
 
         <!-- ⑮ Worker -> Cache: notify -->
         <line x1="551" y1="674" x2="1174" y2="674" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#sah-v)"/>
@@ -657,6 +726,13 @@
         <!-- ⑯ Cache self: poll -->
         <path d="M 1170 692 L 1130 692 L 1130 700 L 1168 700" fill="none" stroke="#a78bfa" stroke-width="1.3" marker-end="url(#sah-v)"/>
         <text x="1125" y="690" fill="#cbd5e1" font-size="8.5" text-anchor="end">⑯ 前端轮询 /api/notifications</text>
+
+        <!-- ===== locale note (between the Store and Cache lifelines, next to the cache-key steps) ===== -->
+        <rect x="1000" y="298" width="170" height="72" rx="6" fill="rgba(30,41,59,0.6)" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="1085" y="320" fill="#cbd5e1" font-size="9" text-anchor="middle">locale = DEFAULT_LOCALE</text>
+        <text x="1085" y="336" fill="#94a3b8" font-size="8" text-anchor="middle">webhook 无用户请求可协商</text>
+        <text x="1085" y="350" fill="#94a3b8" font-size="8" text-anchor="middle">故无 body / Accept-Language</text>
+        <text x="1085" y="362" fill="#94a3b8" font-size="8" text-anchor="middle">线上部署 DEFAULT_LOCALE=en</text>
 
         <!-- ===== lifeline heads ===== -->
         <rect x="35" y="58" width="150" height="56" rx="6" fill="#0f172a"/>
