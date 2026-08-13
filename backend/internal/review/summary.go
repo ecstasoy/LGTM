@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/prompts"
 )
 
-// SummaryStage 渲染 summary.tmpl，吃 L1 + L2 + L3，输出 markdown 总结。
+// SummaryStage 渲染 summary.<locale>.tmpl，吃 L1 + L2 + L3，输出 markdown 总结。
 type SummaryStage struct {
 	Model       string  // 覆盖 provider 默认 model；空串走默认
 	Temperature float32 // 0 走 provider 默认
@@ -22,7 +23,7 @@ func (SummaryStage) Name() string { return "summary" }
 
 // Run 实现 Stage
 func (s SummaryStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<-chan Event, error) {
-	tmpl, err := prompts.Parse("summary.tmpl")
+	tmpl, err := prompts.ParseFor("summary", i18n.ZH)
 	if err != nil {
 		return nil, fmt.Errorf("summary: load template: %w", err)
 	}

@@ -1,0 +1,54 @@
+{{/* Summary stage: L1 + L2 patch + L3 in, prose summary plus review focus out; the length floor stops one-line answers. */ -}}
+You are reviewing a GitHub pull request.
+
+## PR metadata
+{{ .L1Meta }}
+{{ with .L3Conventions }}
+## Project conventions
+{{ . }}
+{{ end }}
+{{ with .L4References }}
+## Related code (cross-file RAG retrieval)
+{{ range . -}}
+**{{ .File }}** ({{ if gt .PRNumber 0 }}from PR #{{ .PRNumber }} · {{ end }}{{ .Reason }})
+```
+{{ .Snippet }}
+```
+
+{{ end -}}
+{{ end }}
+{{ with .L2Files }}
+## Changed files
+{{ range . -}}
+### {{ .Path }}
+```
+{{ .Patch }}
+```
+
+{{ end -}}
+{{ end }}
+{{ with .BudgetReport.Dropped }}
+## Files excluded from this review (over the context budget)
+The files below were changed, but their diffs exceeded the context budget and were not supplied, so they went unreviewed:
+{{ range . }}- {{ . }}
+{{ end }}
+Draw no conclusions about what is in them; if coverage is incomplete, say so explicitly under "Overview".
+{{ end }}
+## Task
+Write the review summary in English using the Markdown structure below, **keeping the whole thing between 130 and 250 words**. Do not narrate your reasoning, do not add meta-commentary (such as "Here is the summary"), do not emit JSON.
+
+### Overview
+**Two paragraphs**, 40-75 words each:
+- First paragraph: what problem this PR solves, or what capability it adds (the business or technical motivation).
+- Second paragraph: the core approach, plus the key files / functions / design decisions, citing concrete paths.
+
+### Review focus
+**3-5 bullets**, 15-40 words each. Stick to what a reviewer should verify:
+- Blast radius (which existing features / interfaces this could disturb)
+- Breaking changes (removed or renamed exported symbols, changed signatures, changed public API / schema) — name them explicitly when present
+- The tricky or error-prone parts of the implementation (concurrency, error handling, edge cases, dependency versions)
+- Whether this matches project conventions and the surrounding code style
+- Whether test coverage is adequate
+- Whether the PR description matches the actual diff (any unmentioned changes riding along)
+
+If the RAG retrieval turned up related code in other files, **cite the concrete paths under Review focus** and say how they relate to this PR (for example, "parallels the X function in a.go"). Do not gesture at it vaguely.

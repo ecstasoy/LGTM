@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/prompts"
@@ -30,7 +31,7 @@ type Suggestion struct {
 	Patch *Patch `json:"patch,omitempty"`
 }
 
-// SuggestionsStage 渲染 suggestions.tmpl，强制 JSON 输出，解析后 emit 一次 suggestions_done。
+// SuggestionsStage 渲染 suggestions.<locale>.tmpl，强制 JSON 输出，解析后 emit 一次 suggestions_done。
 type SuggestionsStage struct {
 	Model       string
 	Temperature float32
@@ -39,7 +40,7 @@ type SuggestionsStage struct {
 func (SuggestionsStage) Name() string { return "suggestions" }
 
 func (s SuggestionsStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<-chan Event, error) {
-	tmpl, err := prompts.Parse("suggestions.tmpl")
+	tmpl, err := prompts.ParseFor("suggestions", i18n.ZH)
 	if err != nil {
 		return nil, fmt.Errorf("suggestions: load template: %w", err)
 	}

@@ -4,11 +4,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/prompts"
 )
 
-var allTemplates = []string{"summary.tmpl", "risks.tmpl", "suggestions.tmpl"}
+var allTemplates = []string{
+	"summary.zh.tmpl", "risks.zh.tmpl", "suggestions.zh.tmpl",
+	"summary.en.tmpl", "risks.en.tmpl", "suggestions.en.tmpl",
+}
+
+var zhTemplates = []string{"summary.zh.tmpl", "risks.zh.tmpl", "suggestions.zh.tmpl"}
 
 func render(t *testing.T, name string, c prctx.Context) string {
 	t.Helper()
@@ -46,7 +52,7 @@ func TestTemplates_OmitDroppedSectionWhenEmpty(t *testing.T) {
 		L1Meta:  "仓库: o/r#1",
 		L2Files: []prctx.FileContext{{Path: "a.go", Patch: "@@ -1 +1 @@"}},
 	}
-	for _, name := range allTemplates {
+	for _, name := range zhTemplates {
 		out := render(t, name, c)
 		if strings.Contains(out, "未纳入") {
 			t.Errorf("%s 在无丢弃文件时不应出现未纳入段落:\n%s", name, out)
@@ -63,7 +69,7 @@ func minimalCtx() prctx.Context {
 
 // few-shot：risks / suggestions 必须带具体示例，降低模型瞎猜 schema 与口径。
 func TestTemplates_HaveFewShotExamples(t *testing.T) {
-	for _, name := range []string{"risks.tmpl", "suggestions.tmpl"} {
+	for _, name := range []string{"risks.zh.tmpl", "suggestions.zh.tmpl"} {
 		out := render(t, name, minimalCtx())
 		if !strings.Contains(out, "示例") {
 			t.Errorf("%s 缺少 few-shot 示例段", name)
@@ -73,7 +79,7 @@ func TestTemplates_HaveFewShotExamples(t *testing.T) {
 
 // 误报护栏：risks 必须明确「不要报告」的清单，降低误报。
 func TestRisksTemplate_HasFalsePositiveGuardrails(t *testing.T) {
-	out := render(t, "risks.tmpl", minimalCtx())
+	out := render(t, "risks.zh.tmpl", minimalCtx())
 	if !strings.Contains(out, "不要报告") {
 		t.Errorf("risks.tmpl 缺少误报护栏（不要报告 清单）:\n%s", out)
 	}
@@ -81,7 +87,7 @@ func TestRisksTemplate_HasFalsePositiveGuardrails(t *testing.T) {
 
 // 建议护栏：suggestions 不得给破坏性 / 改变语义的改写。
 func TestSuggestionsTemplate_HasGuardrails(t *testing.T) {
-	out := render(t, "suggestions.tmpl", minimalCtx())
+	out := render(t, "suggestions.zh.tmpl", minimalCtx())
 	if !strings.Contains(out, "不要建议") {
 		t.Errorf("suggestions.tmpl 缺少建议护栏:\n%s", out)
 	}
@@ -89,10 +95,51 @@ func TestSuggestionsTemplate_HasGuardrails(t *testing.T) {
 
 // 新增评审维度：破坏性变更类别 + 测试缺口 + PR 描述对齐。
 func TestRisksTemplate_CoversNewDimensions(t *testing.T) {
-	out := render(t, "risks.tmpl", minimalCtx())
+	out := render(t, "risks.zh.tmpl", minimalCtx())
 	for _, want := range []string{"breaking", "破坏性", "测试", "描述"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("risks.tmpl 缺少维度关键词 %q", want)
+		}
+	}
+}
+
+// Every stage must have a template in every supported locale.
+func TestParseForCoversEveryStageAndLocale(t *testing.T) {
+	for _, stage := range []string{"summary", "risks", "suggestions"} {
+		for _, locale := range []i18n.Locale{i18n.ZH, i18n.EN} {
+			if _, err := prompts.ParseFor(stage, locale); err != nil {
+				t.Errorf("ParseFor(%q, %q): %v", stage, locale, err)
+			}
+		}
+	}
+}
+
+// The English templates must carry the same guardrails as the Chinese ones.
+func TestEnglishTemplates_MirrorGuardrails(t *testing.T) {
+	if out := render(t, "risks.en.tmpl", minimalCtx()); !strings.Contains(out, "Do not report") {
+		t.Errorf("risks.en.tmpl is missing the false-positive guardrail list:\n%s", out)
+	}
+	if out := render(t, "suggestions.en.tmpl", minimalCtx()); !strings.Contains(out, "Do not suggest") {
+		t.Errorf("suggestions.en.tmpl is missing the suggestion guardrail list:\n%s", out)
+	}
+	for _, name := range []string{"risks.en.tmpl", "suggestions.en.tmpl"} {
+		if out := render(t, name, minimalCtx()); !strings.Contains(out, "Example") {
+			t.Errorf("%s is missing the few-shot example section", name)
+		}
+	}
+	out := render(t, "risks.en.tmpl", minimalCtx())
+	for _, want := range []string{"breaking", "Breaking changes", "Test gaps", "PR description alignment"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("risks.en.tmpl is missing the dimension keyword %q", want)
+		}
+	}
+}
+
+// With nothing dropped the excluded-files section must stay out of the English prompts too.
+func TestEnglishTemplates_OmitDroppedSectionWhenEmpty(t *testing.T) {
+	for _, name := range []string{"summary.en.tmpl", "risks.en.tmpl", "suggestions.en.tmpl"} {
+		if out := render(t, name, minimalCtx()); strings.Contains(out, "over the context budget") {
+			t.Errorf("%s should not emit the excluded-files section when nothing was dropped:\n%s", name, out)
 		}
 	}
 }

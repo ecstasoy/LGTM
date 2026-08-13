@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/prompts"
@@ -21,7 +22,7 @@ type Risk struct {
 	Reason     string  `json:"reason"`
 }
 
-// RisksStage 渲染 risks.tmpl，强制 JSON 输出，解析后 emit 一次 risks_done。
+// RisksStage 渲染 risks.<locale>.tmpl，强制 JSON 输出，解析后 emit 一次 risks_done。
 type RisksStage struct {
 	Model       string
 	Temperature float32
@@ -30,7 +31,7 @@ type RisksStage struct {
 func (RisksStage) Name() string { return "risks" }
 
 func (s RisksStage) Run(ctx context.Context, c prctx.Context, p llm.Provider) (<-chan Event, error) {
-	tmpl, err := prompts.Parse("risks.tmpl")
+	tmpl, err := prompts.ParseFor("risks", i18n.ZH)
 	if err != nil {
 		return nil, fmt.Errorf("risks: load template: %w", err)
 	}
