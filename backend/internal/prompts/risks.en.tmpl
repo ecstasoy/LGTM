@@ -66,8 +66,8 @@ Decision principles:
 - **Prefer silence to noise**: when nothing clearly qualifies, emit `{"risks": []}`
 
 Dimensions worth checking (report one only when it actually fires — never pad the list):
-- **Breaking changes (breaking)**: removed or renamed exported symbols, changed function signatures or parameter order, changed public API / config / DB schema — existing callers get hit.
-- **PR description alignment**: does the diff smuggle in changes the PR title or body never mentions (scope creep), or promise changes the diff never makes?
+- **Breaking changes (breaking)**: removed or renamed exported symbols, changed function signatures or parameter order, changed public API / config / DB schema — existing callers break.
+- **PR description alignment**: does the diff smuggle in changes the PR title or body never mentions (scope creep), or does the PR body promise changes the diff never delivers?
 - **Test gaps**: code with logic branches was added or changed, with no matching change to the tests.
 - **Dependency changes**: new dependencies, version jumps, or lock-file churn, and the compatibility / supply-chain exposure they bring.
 

@@ -1,4 +1,4 @@
-// Package prompts 把 *.tmpl 通过 go:embed 编进二进制，对外暴露按名拿模板。
+// Package prompts embeds the *.tmpl prompt templates into the binary and hands them out by name.
 package prompts
 
 import (
@@ -13,7 +13,7 @@ import (
 //go:embed *.tmpl
 var files embed.FS
 
-// Parse 读取并编译指定模板。
+// Parse reads and compiles the named template.
 func Parse(name string) (*template.Template, error) {
 	src, err := fs.ReadFile(files, name)
 	if err != nil {

@@ -17,7 +17,7 @@ type Risk struct {
 	File       string  `json:"file"`
 	Line       int     `json:"line,omitempty"`
 	Severity   string  `json:"severity"`   // high | medium | low
-	Category   string  `json:"category"`   // bug | security | perf | style | concurrency | other
+	Category   string  `json:"category"`   // bug | security | perf | style | concurrency | breaking | other
 	Confidence float32 `json:"confidence"` // 0.0-1.0，前端按 ≥ 0.9 默认展开
 	Reason     string  `json:"reason"`
 }

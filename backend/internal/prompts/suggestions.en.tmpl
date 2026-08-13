@@ -44,7 +44,7 @@ Emit **strict JSON only** — no surrounding prose, no Markdown code fence:
       "file": "path/to/file",
       "line": 123,
       "type": "bug",
-      "title": "one line on what to change (under 15 words)",
+      "title": "one line on what to change (under 12 words)",
       "body": "how to change it, plus a brief why (under 75 words)",
       "patch": {
         "lang": "go",
@@ -58,15 +58,15 @@ Emit **strict JSON only** — no surrounding prose, no Markdown code fence:
 
 Field constraints:
 - `type`: `bug` | `style` | `perf` | `security` | `concurrency`
-- `title`: under 15 words, usable verbatim as the title of a GitHub PR review comment
-- `body`: under 75 words
+- `title`: English, under 12 words, usable verbatim as the title of a GitHub PR review comment
+- `body`: English, under 75 words
 - `patch` **may be omitted or null** — when the suggestion is purely descriptive and rewrites no concrete code
 - With nothing actionable to say, emit `{"suggestions": []}`
 
 Principles:
 - Every suggestion should paste straight into a GitHub PR review comment
 - `patch.before` / `patch.after` are **code snippets**, not whole files
-- Concentrate on how to change it; skip the long rationale
+- Concentrate on how to change it; skip long rationales
 
 Do not suggest (this avoids noise and dangerous rewrites):
 - No destructive or semantics-changing rewrites: dropping error handling, swallowing exceptions, altering a public signature or default behavior.
