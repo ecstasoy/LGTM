@@ -24,11 +24,8 @@ type cachedPayload struct {
 	Author     string `json:"author,omitempty"`
 	AuthorRole string `json:"author_role,omitempty"`
 	Lang       string `json:"lang,omitempty"` // the PR's primary language (majority vote over file extensions); used by the /history language filter
-	// Locale is the review output language ("zh" | "en") resolved for this request (see resolveLocale).
-	// Rows written before this field existed have no "locale" key in their stored JSON, so they decode
-	// as "" regardless of what the reviews.locale column says (that column's own pre-i18n backfill
-	// defaults every old row to "zh" — see store.ensureLocaleColumn — but the frontend never reads that
-	// column; it only ever sees this payload field). The frontend treats "" as unknown and shows no notice.
+	// Locale is the review output language ("zh" | "en", see resolveLocale); pre-existing rows decode
+	// as "" here regardless of the reviews.locale column's own "zh" backfill (store.ensureLocaleColumn) — the frontend never reads that column, only this field, and treats "" as unknown.
 	Locale      string          `json:"locale,omitempty"`
 	State       string          `json:"state,omitempty"`
 	Labels      []string        `json:"labels,omitempty"`

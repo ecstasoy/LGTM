@@ -283,11 +283,21 @@ function Row({
 }
 
 // LocaleBadge: marks a history row whose stored review locale differs from the current UI locale.
-// Renders the locale *code* (ZH / EN), not a translated language name — matching the code, not a
-// display string, is what the row's `review.locale !== uiLocale` comparison above already does.
+// The glyph stays the locale *code* (ZH / EN) — matching the code, not a display string, is what
+// the row's `review.locale !== uiLocale` comparison above already does — but the code alone means
+// nothing to a reader scanning the table, so title + aria-label carry the same explanatory
+// sentence used by the review-detail notice (t.review.generatedInOtherLocale), not just the bare
+// language name.
 function LocaleBadge({ locale }: { locale: "zh" | "en" }) {
+  const t = useT();
+  const languageName = locale === "zh" ? t.review.languageNameZh : t.review.languageNameEn;
+  const explanation = t.review.generatedInOtherLocale(languageName);
   return (
-    <span className="shrink-0 rounded-sm border border-border-strong bg-surface-2 px-1 py-[1px] font-mono text-[9px] font-semibold uppercase tracking-wider text-muted">
+    <span
+      title={explanation}
+      aria-label={explanation}
+      className="shrink-0 rounded-sm border border-border-strong bg-surface-2 px-1 py-[1px] font-mono text-[9px] font-semibold uppercase tracking-wider text-muted"
+    >
       {locale}
     </span>
   );

@@ -39,9 +39,7 @@ type reviewListItem struct {
 	Lang      string `json:"lang,omitempty"`       // the PR's primary language (what detectPrimaryLang returned); used by the /history language filter
 	Source    string `json:"source,omitempty"`     // "manual" / "webhook"; the frontend renders the ⚡ chip from this
 	CreatedBy string `json:"created_by,omitempty"` // GitHub login; empty = anonymous leftover; the frontend gates the delete button on it
-	// Locale is the review output language ("zh" | "en"), read from the cached payload — never the
-	// reviews.locale store column, whose pre-i18n backfill fabricates "zh" for old rows (see cachedPayload.Locale).
-	// Empty means unknown (a pre-i18n row); the frontend must not treat that as "zh".
+	// Locale is the review output language ("zh" | "en"), read from the cached payload, never the reviews.locale store column (see cachedPayload.Locale); empty means unknown, never "zh".
 	Locale     string     `json:"locale,omitempty"`
 	RiskCounts riskCounts `json:"risk_counts"`
 }
