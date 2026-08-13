@@ -5,6 +5,7 @@ import Link from "next/link";
 import { History as HistoryIcon, Search, Trash2 } from "lucide-react";
 
 import { listReviews } from "@/lib/api";
+import { ApiError, friendlyError } from "@/lib/errors";
 import type { ReviewSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useMe } from "@/lib/auth";
@@ -39,11 +40,22 @@ export default function HistoryPage() {
         if (!cancelled) setItems(d);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setError(
+            friendlyError(
+              e instanceof Error ? e.message : String(e),
+              t,
+              e instanceof ApiError ? e.code : undefined,
+            ),
+          );
+        }
       });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `t` intentionally omitted: this is a
+    // one-shot fetch (resolves almost instantly), not a long-lived stream, so staleness risk from a
+    // mid-flight locale toggle is negligible; re-adding it would refetch on every locale switch.
   }, [nonce]);
 
   async function handleDelete(id: string, label: string) {
@@ -52,7 +64,15 @@ export default function HistoryPage() {
       await deleteReview(id);
       setNonce((n) => n + 1);
     } catch (e) {
-      window.alert(t.history.deleteFailed(e instanceof Error ? e.message : String(e)));
+      window.alert(
+        t.history.deleteFailed(
+          friendlyError(
+            e instanceof Error ? e.message : String(e),
+            t,
+            e instanceof ApiError ? e.code : undefined,
+          ),
+        ),
+      );
     }
   }
 

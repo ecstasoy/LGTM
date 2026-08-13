@@ -13,10 +13,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { streamSteer } from "@/lib/sse";
+import { ApiError, friendlyError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { Spinner } from "@/components/ui/spinner";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
 import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 // chatProse 聊天气泡内 markdown 排版：紧凑间距 + 小字号；与 SummaryCard 的宽松排版区分
@@ -51,6 +52,7 @@ interface Msg {
 // SSE tool_call_start/done → 在 chat 内插 tool message；agent_reply → assistant message。
 export function AgentPanel({ onClose, reviewId }: Props) {
   const t = useT();
+  const locale = useLocale();
   // The greeting is NOT seeded into msgs: it's rendered straight from t.agent.introMessage below,
   // so it re-localizes immediately if the user toggles the language while the panel stays open.
   // Persisting it into state would freeze it in whatever locale was active at mount.
@@ -150,14 +152,17 @@ export function AgentPanel({ onClose, reviewId }: Props) {
           },
         },
         tRef,
+        locale,
         controller.signal,
         "agent",
       );
     } catch (e) {
-      setMsgs((m) => [
-        ...m,
-        { role: "assistant", text: `❌ ${e instanceof Error ? e.message : String(e)}` },
-      ]);
+      const resolved = friendlyError(
+        e instanceof Error ? e.message : String(e),
+        tRef.current,
+        e instanceof ApiError ? e.code : undefined,
+      );
+      setMsgs((m) => [...m, { role: "assistant", text: `❌ ${resolved}` }]);
     } finally {
       inFlightRef.current = false;
       setThinking(false);

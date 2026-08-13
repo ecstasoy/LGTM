@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronRight, History, Trash2 } from "lucide-react";
 
 import { listReviews } from "@/lib/api";
+import { ApiError, friendlyError } from "@/lib/errors";
 import type { ReviewSummary } from "@/lib/types";
 import { useMe } from "@/lib/auth";
 import { deleteReview } from "@/lib/reviews";
@@ -38,11 +39,21 @@ export function RecentReviewsList() {
         if (!cancelled) setItems(d as SummaryWithCounts[]);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setError(
+            friendlyError(
+              e instanceof Error ? e.message : String(e),
+              t,
+              e instanceof ApiError ? e.code : undefined,
+            ),
+          );
+        }
       });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see the matching comment in
+    // app/(main)/history/page.tsx: one-shot fetch, `t` staleness risk is negligible.
   }, [nonce]);
 
   async function handleDelete(id: string, label: string) {
@@ -51,7 +62,15 @@ export function RecentReviewsList() {
       await deleteReview(id);
       setNonce((n) => n + 1);
     } catch (e) {
-      window.alert(t.recentReviews.deleteFailed(e instanceof Error ? e.message : String(e)));
+      window.alert(
+        t.recentReviews.deleteFailed(
+          friendlyError(
+            e instanceof Error ? e.message : String(e),
+            t,
+            e instanceof ApiError ? e.code : undefined,
+          ),
+        ),
+      );
     }
   }
 

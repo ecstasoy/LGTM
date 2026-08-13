@@ -91,7 +91,9 @@ function ReviewDetailPageContent({ id }: { id: string }) {
   const [risksDone, setRisksDone] = useState(false);
   const [suggestionsDone, setSuggestionsDone] = useState(false);
   const [streaming, setStreaming] = useState(isStreaming);
-  const [info, setInfo] = useState<string | null>(null);
+  // info carries the optional stable `code` alongside the raw message (e.g. review.go's empty_pr
+  // notice) so InfoBanner can resolve it through friendlyError instead of rendering backend prose raw.
+  const [info, setInfo] = useState<{ message: string; code?: string } | null>(null);
   // agentReply: the agent loop's final answer via the structured agent_reply SSE frame (Task 19),
   // rendered separately from `info` so it doesn't need the old regex to tell the two apart.
   const [agentReply, setAgentReply] = useState<{ steps: number; output: string } | null>(null);
@@ -160,7 +162,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
           !cancelled && setToolEvents((prev) => mergeToolStart(prev, call)),
         onToolCallDone: (call) =>
           !cancelled && setToolEvents((prev) => mergeToolDone(prev, call)),
-        onInfo: (m) => !cancelled && setInfo(m),
+        onInfo: (m, code) => !cancelled && setInfo({ message: m, code }),
         onAgentReply: (steps, output) => !cancelled && setAgentReply({ steps, output }),
         onStageError: (stage, msg) => {
           if (cancelled) return;
@@ -389,7 +391,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
         )}
         <main ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-[1080px] flex-col gap-4 px-5 py-5">
-            {info ? <InfoBanner info={info} /> : null}
+            {info ? <InfoBanner message={info.message} code={info.code} /> : null}
             {agentReply ? <AgentReplyBanner steps={agentReply.steps} output={agentReply.output} /> : null}
             {stageErrors.context ? (
               <StageErrorBanner stage={t.review.stageContext} message={stageErrors.context} />
@@ -433,7 +435,7 @@ function ReviewDetailPageContent({ id }: { id: string }) {
                 onSteeredSuggestions={setSuggestions}
                 onSteerToolCallStart={(call) => setToolEvents((prev) => mergeToolStart(prev, call))}
                 onSteerToolCallDone={(call) => setToolEvents((prev) => mergeToolDone(prev, call))}
-                onSteerInfo={setInfo}
+                onSteerInfo={(m, code) => setInfo({ message: m, code })}
                 toolEvents={toolEvents}
               />
             )}
@@ -580,13 +582,17 @@ function StageErrorBanner({ stage, message }: { stage: string; message: string }
 const infoProse =
   "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-surface [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-surface [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-text";
 
-// InfoBanner: plain-text status line (e.g. the empty_pr notice, or a steer stage-rerun status
-// forwarded up from AgentSessionView). No longer regex-sniffs the text for an agent completion —
-// see AgentReplyBanner below, fed by the structured agent_reply SSE frame instead.
-function InfoBanner({ info }: { info: string }) {
+// InfoBanner: status line (e.g. the empty_pr notice, or a steer stage-rerun status forwarded up
+// from AgentSessionView). Resolves through friendlyError so a coded frame (review.go's empty_pr,
+// CodeEmptyPR) renders localized copy instead of the backend's raw — always-Chinese — message;
+// code is undefined for frames that don't carry one (e.g. steer.go's stage-rerun status), in which
+// case friendlyError falls through to the raw text unchanged, same as before. No longer regex-sniffs
+// the text for an agent completion — see AgentReplyBanner below, fed by the agent_reply SSE frame.
+function InfoBanner({ message, code }: { message: string; code?: string }) {
+  const t = useT();
   return (
     <div className="rounded-md border border-border bg-surface-2 px-4 py-3 text-sm text-text-2">
-      {info}
+      {friendlyError(message, t, code)}
     </div>
   );
 }

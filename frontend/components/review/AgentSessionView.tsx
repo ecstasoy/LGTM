@@ -27,11 +27,12 @@ import type {
   Suggestion,
 } from "@/lib/types";
 import { streamSteer, type SteerMode } from "@/lib/sse";
+import { ApiError, friendlyError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { FileStatusBadge } from "@/components/ui/file-status-badge";
 import { SeverityBadge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
 import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 type StepStatus = "pending" | "running" | "done" | "error";
@@ -70,7 +71,7 @@ interface Props {
   onSteeredSuggestions?: (suggestions: Suggestion[]) => void;
   onSteerToolCallStart?: (call: AgentToolCall) => void;
   onSteerToolCallDone?: (call: AgentToolCall) => void;
-  onSteerInfo?: (message: string) => void;
+  onSteerInfo?: (message: string, code?: string) => void;
   // Agent loop tool 调用事件（A3 后端 emit tool_call_start/done）
   // 按 id 已合并 start/done，状态从 running → done/error；从父级 state 流下来
   toolEvents?: ToolEvent[];
@@ -150,6 +151,7 @@ export function AgentSessionView({
   toolEvents,
 }: Props) {
   const t = useT();
+  const locale = useLocale();
   // Mutated on every render, read only when streamSteer's async path actually throws — so an
   // in-flight steer request picks up a locale change without needing to be restarted.
   const tRef = useRef(t);
@@ -219,7 +221,7 @@ export function AgentSessionView({
                 ),
               );
             },
-            onInfo: (message) => {
+            onInfo: (message, code) => {
               if (message.startsWith("Agent 启动")) {
                 // GAP (follow-up needed): the backend has no structured equivalent for this startup
                 // notice yet — see backend/internal/api/steer.go's first writeSSE(..., "info", ...)
@@ -235,11 +237,14 @@ export function AgentSessionView({
               if (mode === "agent") return;
               // stage mode's own status line (e.g. "正在按引导重跑 X 阶段…") has no structured
               // equivalent either, but it's plain text with nothing to parse — safe to forward as-is.
-              onSteerInfo?.(message);
+              // code is forwarded too (currently always undefined on this path — steer.go's stage-mode
+              // info frame carries no code — but the caller resolves through friendlyError regardless).
+              onSteerInfo?.(message, code);
             },
             onStageError: (_s, msg) => markError(msg),
           },
           tRef,
+          locale,
           undefined,
           mode,
         );
@@ -255,7 +260,13 @@ export function AgentSessionView({
           ),
         );
       } catch (e) {
-        markError(e instanceof Error ? e.message : String(e));
+        markError(
+          friendlyError(
+            e instanceof Error ? e.message : String(e),
+            tRef.current,
+            e instanceof ApiError ? e.code : undefined,
+          ),
+        );
       } finally {
         steerInFlightRef.current = false;
         setSteerInFlight(false);
@@ -263,6 +274,7 @@ export function AgentSessionView({
     },
     [
       reviewId,
+      locale,
       onSteeredRisks,
       onSteeredSuggestions,
       onSteerInfo,
