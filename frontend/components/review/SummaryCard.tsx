@@ -1,8 +1,11 @@
+"use client";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlignLeft } from "lucide-react";
 
 import { Spinner } from "@/components/ui/spinner";
+import { useT } from "@/lib/i18n/context";
 
 interface Props {
   summary: string;
@@ -12,6 +15,7 @@ interface Props {
 // SummaryCard 变更总结卡：左上图标块 + 标题；streaming=true 右上挂"流式生成中" + Spinner，正文末尾闪烁光标
 // 对齐 design 原型 SummaryCard 视觉（surface 卡 + accent 图标块）
 export function SummaryCard({ summary, streaming = false }: Props) {
+  const t = useT();
   if (!summary && !streaming) return null;
   return (
     <section className="rounded-lg border border-border bg-surface">
@@ -20,12 +24,12 @@ export function SummaryCard({ summary, streaming = false }: Props) {
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-surface-2 text-accent">
             <AlignLeft className="h-4 w-4" />
           </span>
-          <h2 className="text-sm font-semibold">变更总结</h2>
+          <h2 className="text-sm font-semibold">{t.review.summaryCardTitle}</h2>
         </div>
         {streaming ? (
           <span className="inline-flex items-center gap-1.5 text-xs text-muted">
             <Spinner size="xs" />
-            流式生成中
+            {t.review.summaryStreamingBadge}
           </span>
         ) : null}
       </header>
@@ -33,7 +37,7 @@ export function SummaryCard({ summary, streaming = false }: Props) {
         {summary ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
         ) : (
-          <p className="text-muted">生成总结中…</p>
+          <p className="text-muted">{t.review.summaryGenerating}</p>
         )}
         {streaming && summary ? (
           <span className="inline-block h-3 w-[5px] animate-caret-blink bg-text align-middle" />

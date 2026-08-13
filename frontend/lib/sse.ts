@@ -1,3 +1,4 @@
+import type { Dict } from "./i18n/dictionaries/zh";
 import type {
   AgentToolCall,
   BudgetReport,
@@ -7,8 +8,18 @@ import type {
   Suggestion,
 } from "./types";
 
-// 重导出方便老消费者继续 import 自此处；新代码请直接从 ./types 取
+// Re-exported so existing consumers can keep importing it from here; new code should import from ./types directly.
 export type { PrMeta } from "./types";
+
+// Shaped like a React ref (deliberately not importing React's RefObject type here — this file has
+// no other React dependency). The caller passes a ref whose .current it keeps updated on every
+// render; streamReview/streamSteer dereference it only at the moment they actually need to throw,
+// not when the call is first made, so a locale switch mid-request can't leave a stale dictionary
+// captured in the closure. Same technique as lib/perms.ts's tRef, just supplied by the caller
+// instead of created internally, since these are plain async functions, not hooks.
+export interface DictRef {
+  readonly current: Dict;
+}
 
 export interface StreamCallbacks {
   onPr?: (pr: PrMeta) => void;
@@ -19,7 +30,7 @@ export interface StreamCallbacks {
   onSuggestionsDone?: (suggestions: Suggestion[]) => void;
   onSteeredRisks?: (risks: Risk[]) => void;
   onSteeredSuggestions?: (suggestions: Suggestion[]) => void;
-  // agent loop（A3 后端 emit）
+  // Agent loop (emitted by the backend in A3).
   onToolCallStart?: (call: AgentToolCall) => void;
   onToolCallDone?: (call: AgentToolCall) => void;
   onAgentTextDelta?: (delta: string) => void;
@@ -27,17 +38,21 @@ export interface StreamCallbacks {
   onStageError?: (stage: string, message: string) => void;
   onStageDone?: (stage: string) => void;
   onDone?: () => void;
-  // review_id：流式评审 persist 后后端发；前端拿来在 /review/streaming 页启用 adopt + steer 按钮
-  // 没这帧前端只能等用户回首页点列表条目；详见 PR #91
+  // review_id: sent by the backend once a streamed review has persisted; the frontend uses it to
+  // enable the adopt + steer buttons on the /review/streaming page.
+  // Without this frame the frontend can only wait for the user to go back home and click the list entry; see PR #91.
   onReviewID?: (id: string) => void;
 }
 
-// SSE_IDLE_TIMEOUT_MS 两帧之间的最长等待。summary 边生成边推帧，但 risks / suggestions
-// 在计算期间静默（算完才发一帧），所以放宽到 90s：既能兜住真正卡死的连接，又不误杀
-// 慢但正常的大 PR。超时后 page 显示可重试的超时提示，而非永远卡在「生成中」。
+// SSE_IDLE_TIMEOUT_MS: the longest gap allowed between frames. The summary streams as it's
+// generated, but risks/suggestions go quiet while computing (one frame once done), so this is
+// relaxed to 90s: long enough to tolerate a big-but-healthy PR, short enough to catch a truly
+// stuck connection. On timeout the page shows a retryable timeout message instead of hanging
+// on "generating" forever.
 const SSE_IDLE_TIMEOUT_MS = 90_000;
 
-// SSETimeoutError 流在 SSE_IDLE_TIMEOUT_MS 内无新帧；lib/errors friendlyError 据消息翻成中文。
+// SSETimeoutError: the stream produced no new frame within SSE_IDLE_TIMEOUT_MS.
+// lib/errors' friendlyError maps this message onto a localized string.
 export class SSETimeoutError extends Error {
   constructor() {
     super("sse idle timeout");
@@ -45,18 +60,20 @@ export class SSETimeoutError extends Error {
   }
 }
 
-// SteerMode 决定 steer 端点跑哪条路径：
-//   - "stage"（默认）：重跑 risks / suggestions stage，结果替换前端 state（v2 行为）
-//   - "agent"：跑 agent.Run + ReAct loop + 工具调用，结果作 info 帧（A5）；前端会看到 tool_call 时间线步骤
+// SteerMode picks which path the steer endpoint takes:
+//   - "stage" (default): reruns the risks/suggestions stage, replacing frontend state (v2 behavior)
+//   - "agent": runs agent.Run + the ReAct loop + tool calls, results arrive as info frames (A5);
+//     the frontend shows a tool-call timeline
 export type SteerMode = "stage" | "agent";
 
-// streamSteer POST /api/review/:id/steer 引导重跑 stage 或跑 agent loop。
-// 与 streamReview 一样按 SSE 帧分发；4xx/5xx 同步错误直接 throw。
+// streamSteer POSTs /api/review/:id/steer to rerun a stage or run the agent loop.
+// Dispatches SSE frames the same way as streamReview; a synchronous 4xx/5xx throws directly.
 export async function streamSteer(
   reviewId: string,
   text: string,
   stage: "risks" | "suggestions",
   cb: StreamCallbacks,
+  t: DictRef,
   signal?: AbortSignal,
   mode: SteerMode = "stage",
 ): Promise<void> {
@@ -72,16 +89,17 @@ export async function streamSteer(
     throw new Error(msg);
   }
   if (!res.body) {
-    throw new Error("响应无 body");
+    throw new Error(t.current.errors.emptyResponseBody);
   }
   await consume(res.body, cb);
 }
 
-// streamReview POST /api/review，按 SSE 帧分发到对应回调。
-// 4xx/5xx 同步错误直接 throw；流中各 stage 错误走 onStageError。
+// streamReview POSTs /api/review and dispatches the resulting SSE frames to the matching callback.
+// A synchronous 4xx/5xx throws directly; per-stage errors within the stream go through onStageError.
 export async function streamReview(
   url: string,
   cb: StreamCallbacks,
+  t: DictRef,
   signal?: AbortSignal,
   model?: string,
   stageModels?: Record<string, string>,
@@ -101,12 +119,12 @@ export async function streamReview(
     throw new Error(msg);
   }
   if (!res.body) {
-    throw new Error("响应无 body");
+    throw new Error(t.current.errors.emptyResponseBody);
   }
   await consume(res.body, cb);
 }
 
-// consume 共用读流 / 切帧 / 派发循环；streamReview 与 streamSteer 都走这里
+// consume: the shared read/frame-split/dispatch loop used by both streamReview and streamSteer.
 async function consume(body: ReadableStream<Uint8Array>, cb: StreamCallbacks): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -118,7 +136,7 @@ async function consume(body: ReadableStream<Uint8Array>, cb: StreamCallbacks): P
       if (done) break;
       buf += decoder.decode(value, { stream: true });
 
-      // 按 \n\n 切帧；最后一段可能是不完整的，留在 buf
+      // Split frames on \n\n; the last chunk may be incomplete, so it stays in buf.
       const parts = buf.split("\n\n");
       buf = parts.pop() ?? "";
 
@@ -128,7 +146,7 @@ async function consume(body: ReadableStream<Uint8Array>, cb: StreamCallbacks): P
       }
     }
   } finally {
-    // 超时 cancel 后底层 read() 可能仍 pending，releaseLock 会抛；忽略即可
+    // After a timeout cancel, the underlying read() may still be pending and releaseLock() can throw; ignore it.
     try {
       reader.releaseLock();
     } catch {
@@ -137,8 +155,9 @@ async function consume(body: ReadableStream<Uint8Array>, cb: StreamCallbacks): P
   }
 }
 
-// readWithIdleTimeout 给 reader.read() 套空闲超时：超过 ms 无新帧则 cancel 流并抛 SSETimeoutError。
-// cancel 让上游 fetch 连接尽快释放，避免卡死的连接挂着不收。
+// readWithIdleTimeout wraps reader.read() with an idle timeout: if no new frame arrives within
+// ms, it cancels the stream and throws SSETimeoutError. Cancelling lets the upstream fetch
+// connection release promptly instead of hanging around unread.
 async function readWithIdleTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   ms: number,
@@ -180,7 +199,7 @@ function dispatch(ev: ParsedFrame, cb: StreamCallbacks): void {
   try {
     parsed = JSON.parse(ev.data);
   } catch {
-    return; // 非法 JSON 跳过
+    return; // skip invalid JSON
   }
   switch (ev.type) {
     case "pr":

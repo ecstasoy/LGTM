@@ -31,6 +31,8 @@ import { cn } from "@/lib/utils";
 import { FileStatusBadge } from "@/components/ui/file-status-badge";
 import { SeverityBadge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
+import { useT } from "@/lib/i18n/context";
+import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 type StepStatus = "pending" | "running" | "done" | "error";
 
@@ -147,6 +149,11 @@ export function AgentSessionView({
   onSteerInfo,
   toolEvents,
 }: Props) {
+  const t = useT();
+  // Mutated on every render, read only when streamSteer's async path actually throws — so an
+  // in-flight steer request picks up a locale change without needing to be restarted.
+  const tRef = useRef(t);
+  tRef.current = t;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 5 步状态从 SSE 派生：
@@ -225,6 +232,7 @@ export function AgentSessionView({
             },
             onStageError: (_s, msg) => markError(msg),
           },
+          tRef,
           undefined,
           mode,
         );
@@ -253,6 +261,8 @@ export function AgentSessionView({
       onSteerInfo,
       onSteerToolCallDone,
       onSteerToolCallStart,
+      // tRef intentionally omitted: refs have a stable identity across renders (like a state
+      // setter), so it doesn't need to be listed for this callback to stay up to date.
     ],
   );
 
@@ -264,10 +274,10 @@ export function AgentSessionView({
     if (el) el.scrollTop = el.scrollHeight;
   }, [statuses, finished, (toolEvents ?? []).length]);
 
-  // budget 优先用后端真值（SSE budget_report / cached detail）；缺失时回退到 patch-bytes 粗估
+  // budget prefers backend truth (SSE budget_report / cached detail); falls back to a patch-bytes estimate when missing
   const budgetView = useMemo(
-    () => (budget ? fromBudgetReport(budget) : estimateBudget(pr, files)),
-    [budget, pr, files],
+    () => (budget ? fromBudgetReport(budget, t) : estimateBudget(pr, files, t)),
+    [budget, pr, files, t],
   );
 
   return (
@@ -280,47 +290,53 @@ export function AgentSessionView({
             </span>
             <div className="min-w-0">
               <div className="text-base font-semibold">
-                评审 {pr.owner}/{pr.repo}#{pr.pr}
+                {t.agent.sessionTitle(pr.owner, pr.repo, pr.pr)}
               </div>
-              <div className="font-mono text-xs text-muted">
-                reviewer 视角 · 任意公开 PR · 无需仓库权限
-              </div>
+              <div className="font-mono text-xs text-muted">{t.agent.reviewerPerspectiveNote}</div>
             </div>
           </header>
 
           <Step
             icon={<GitBranch className="h-3.5 w-3.5" />}
-            title="解析 PR URL"
+            title={t.agent.stepParseTitle}
             status={statuses[0]}
             meta={`${pr.owner}/${pr.repo}#${pr.pr}`}
+            t={t}
           >
             <ParseChips pr={pr} />
           </Step>
           <Step
             icon={<GitPullRequest className="h-3.5 w-3.5" />}
-            title="拉取 PR meta + diff"
+            title={t.agent.stepFetchTitle}
             status={statuses[1]}
             meta={
               pr.stats
                 ? `${pr.stats.files} files · +${pr.stats.additions} −${pr.stats.deletions}`
                 : `${files.length} files`
             }
+            t={t}
           >
-            <FetchDetail files={files} pr={pr} />
+            <FetchDetail files={files} pr={pr} t={t} />
           </Step>
           <Step
             icon={<AlignLeft className="h-3.5 w-3.5" />}
-            title="构建三层上下文"
+            title={t.agent.stepContextTitle}
             status={statuses[2]}
-            meta={`${(budgetView.total / 1000).toFixed(1)}K tok${budgetView.estimated ? "（粗估）" : ""}`}
+            meta={`${(budgetView.total / 1000).toFixed(1)}K tok${budgetView.estimated ? t.agent.estimatedSuffix : ""}`}
+            t={t}
           >
-            <ContextDetail budget={budgetView} />
+            <ContextDetail budget={budgetView} t={t} />
           </Step>
           <Step
             icon={<Sparkle className="h-3.5 w-3.5" />}
-            title="并行调用 LLM"
+            title={t.agent.stepLlmTitle}
             status={statuses[3]}
-            meta={summary ? `${risks.length} 风险 · ${suggestions.length} 建议` : ""}
+            meta={
+              summary
+                ? `${t.agent.riskCountPhrase(risks.length)} · ${t.agent.suggestionCountPhrase(suggestions.length)}`
+                : ""
+            }
+            t={t}
           >
             <LlmDetail
               summary={summary}
@@ -330,45 +346,49 @@ export function AgentSessionView({
               risksDone={risksDone}
               suggestionsDone={suggestionsDone}
               streaming={streaming}
+              t={t}
             />
           </Step>
           {(toolEvents ?? []).map((evt) => (
             <Step
               key={evt.id}
               icon={<Wrench className="h-3.5 w-3.5" />}
-              title={`调用 ${evt.name}`}
+              title={t.agent.toolCallStepTitle(evt.name)}
               status={evt.status}
-              meta={toolMeta(evt)}
+              meta={toolMeta(evt, t)}
+              t={t}
             >
-              <ToolEventDetail evt={evt} />
+              <ToolEventDetail evt={evt} t={t} />
             </Step>
           ))}
 
           <Step
             icon={<HistoryIcon className="h-3.5 w-3.5" />}
-            title="写入缓存"
+            title={t.agent.stepCacheTitle}
             status={statuses[4]}
             meta={statuses[4] === "done" ? "SQLite" : ""}
             isLast={steerHistory.length === 0}
+            t={t}
           >
-            <CacheDetail pr={pr} />
+            <CacheDetail pr={pr} t={t} />
           </Step>
 
           {steerHistory.map((entry, i) => (
             <Step
               key={entry.id}
               icon={<MessageSquare className="h-3.5 w-3.5" />}
-              title="用户引导"
+              title={t.agent.stepSteerTitle}
               status={entry.status}
-              meta={steerMeta(entry)}
+              meta={steerMeta(entry, t)}
               isLast={i === steerHistory.length - 1}
+              t={t}
             >
-              <SteerDetail entry={entry} />
+              <SteerDetail entry={entry} t={t} />
             </Step>
           ))}
 
           {finished ? (
-            <FinalCard pr={pr} risks={risks} suggestions={suggestions} />
+            <FinalCard pr={pr} risks={risks} suggestions={suggestions} t={t} />
           ) : (
             <div className="flex items-center gap-2 pl-[38px] text-sm text-muted">
               <span className="flex gap-1">
@@ -380,7 +400,7 @@ export function AgentSessionView({
                   />
                 ))}
               </span>
-              Agent 正在工作…
+              {t.agent.agentWorkingLabel}
             </div>
           )}
         </div>
@@ -390,28 +410,29 @@ export function AgentSessionView({
         disabled={!reviewId}
         inFlight={steerInFlight}
         onSend={handleSteerSend}
+        t={t}
       />
     </div>
   );
 }
 
-function steerMeta(entry: SteerEntry): string {
+function steerMeta(entry: SteerEntry, t: Dict): string {
   if (entry.mode === "agent") {
-    if (entry.status === "running") return "Agent 深挖 · 运行中";
-    if (entry.status === "error") return "Agent 深挖 · 失败";
-    return "Agent 深挖 · 已完成";
+    if (entry.status === "running") return `${t.agent.agentDeepDiveLabel} · ${t.agent.runningLabel}`;
+    if (entry.status === "error") return `${t.agent.agentDeepDiveLabel} · ${t.agent.failedLabel}`;
+    return `${t.agent.agentDeepDiveLabel} · ${t.agent.doneLabel}`;
   }
-  const label = entry.stage === "risks" ? "重评风险" : "重出建议";
-  if (entry.status === "running") return `${label} · 运行中`;
-  if (entry.status === "error") return `${label} · 失败`;
-  return `${label} · ${entry.resultCount ?? 0} 项`;
+  const label = t.agent.steerStageLabel(entry.stage);
+  if (entry.status === "running") return `${label} · ${t.agent.runningLabel}`;
+  if (entry.status === "error") return `${label} · ${t.agent.failedLabel}`;
+  return `${label} · ${t.agent.itemsCount(entry.resultCount ?? 0)}`;
 }
 
 // agentReplyProse 跟 page.tsx InfoBanner 同款紧凑 markdown 排版
 const agentReplyProse =
   "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-surface-2 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-surface-2 [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-text";
 
-function SteerDetail({ entry }: { entry: SteerEntry }) {
+function SteerDetail({ entry, t }: { entry: SteerEntry; t: Dict }) {
   return (
     <ToolCard
       label={
@@ -422,15 +443,16 @@ function SteerDetail({ entry }: { entry: SteerEntry }) {
         </>
       }
     >
-      <p className="text-sm leading-snug text-text-2">「{entry.text}」</p>
+      <p className="text-sm leading-snug text-text-2">{t.agent.quotedText(entry.text)}</p>
       {entry.status === "error" && entry.error ? (
-        <p className="mt-2 text-[10.5px] text-high">引导失败：{entry.error}</p>
+        <p className="mt-2 text-[10.5px] text-high">{t.agent.steerFailedPrefix(entry.error)}</p>
       ) : null}
-      {/* agent 模式：渲染最终 reply markdown 在卡片内（之前飘在页面顶部远离 timeline）*/}
+      {/* agent mode: render the final reply markdown inline in the card (previously floated at the page top, away from the timeline) */}
       {entry.mode === "agent" && entry.agentResponse ? (
         <div className="mt-3 rounded-md border border-border bg-surface p-3">
           <div className="mb-2 text-[10.5px] font-medium text-muted">
-            Agent 回复{entry.agentSteps ? ` · ${entry.agentSteps} 步` : ""}
+            {t.review.agentReplyLabel}
+            {entry.agentSteps ? t.agent.agentStepsSuffix(entry.agentSteps) : ""}
           </div>
           <div className={`text-sm text-text ${agentReplyProse}`}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.agentResponse}</ReactMarkdown>
@@ -440,27 +462,27 @@ function SteerDetail({ entry }: { entry: SteerEntry }) {
       {entry.status === "done" && !(entry.mode === "agent" && entry.agentResponse) ? (
         <p className="mt-2 text-[10.5px] text-faint">
           {entry.mode === "agent"
-            ? "Agent 深挖已完成 · 详情见上方工具调用时间线"
-            : `已替换 ${entry.stage === "risks" ? "风险" : "建议"} 列表 · 共 ${entry.resultCount ?? 0} 项`}
+            ? t.agent.steerAgentCompletedNote
+            : t.agent.steerReplacedListNote(entry.stage, entry.resultCount ?? 0)}
         </p>
       ) : null}
     </ToolCard>
   );
 }
 
-// toolMeta agent 工具调用步骤右侧 meta 文本
-function toolMeta(evt: ToolEvent): string {
-  if (evt.status === "running") return "运行中";
-  if (evt.status === "error") return "失败";
+// toolMeta: meta text shown on the right of an agent tool-call step
+function toolMeta(evt: ToolEvent, t: Dict): string {
+  if (evt.status === "running") return t.agent.runningLabel;
+  if (evt.status === "error") return t.agent.failedLabel;
   const len = evt.result?.length ?? 0;
   if (len > 1000) return `${(len / 1000).toFixed(1)}K chars`;
   return `${len} chars`;
 }
 
-// ToolEventDetail 工具调用详情卡：参数 + 结果（markdown 渲染 + 可滚动）
-// remarkBreaks 把单换行保留为 <br>，避免 patch / grep 输出的逐行结构被 CommonMark 合并
-// 长结果用 max-h + overflow-y-auto 容纳完整内容，不再硬截断
-function ToolEventDetail({ evt }: { evt: ToolEvent }) {
+// ToolEventDetail: tool-call detail card — arguments + result (rendered as markdown, scrollable)
+// remarkBreaks keeps single line breaks as <br>, so patch / grep output's line structure isn't merged by CommonMark
+// Long results use max-h + overflow-y-auto to show the full content instead of hard-truncating
+function ToolEventDetail({ evt, t }: { evt: ToolEvent; t: Dict }) {
   const argsPreview = evt.arguments?.slice(0, 200) ?? "";
   const result = evt.result ?? "";
   return (
@@ -476,7 +498,7 @@ function ToolEventDetail({ evt }: { evt: ToolEvent }) {
       }
     >
       {evt.status === "running" ? (
-        <p className="text-xs text-muted">执行中…</p>
+        <p className="text-xs text-muted">{t.agent.toolExecutingLabel}</p>
       ) : evt.status === "error" ? (
         <p className="text-[11px] text-high">{result}</p>
       ) : (
@@ -499,6 +521,7 @@ function Step({
   meta,
   isLast,
   children,
+  t,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -506,6 +529,7 @@ function Step({
   meta?: string;
   isLast?: boolean;
   children?: React.ReactNode;
+  t: Dict;
 }) {
   const isDone = status === "done";
   const isRunning = status === "running";
@@ -549,7 +573,9 @@ function Step({
             {title}
           </span>
           {isRunning ? (
-            <span className="whitespace-nowrap font-mono text-[10px] text-accent">运行中…</span>
+            <span className="whitespace-nowrap font-mono text-[10px] text-accent">
+              {t.agent.runningEllipsisLabel}
+            </span>
           ) : null}
           {meta && (isDone || isError) ? (
             <span
@@ -610,9 +636,9 @@ function ParseChips({ pr }: { pr: PrMeta }) {
   );
 }
 
-function FetchDetail({ files, pr }: { files: File[]; pr: PrMeta }) {
+function FetchDetail({ files, pr, t }: { files: File[]; pr: PrMeta; t: Dict }) {
   if (files.length === 0) {
-    return <p className="text-xs text-muted">（无文件改动）</p>;
+    return <p className="text-xs text-muted">{t.agent.noFileChangesNote}</p>;
   }
   return (
     <ToolCard
@@ -634,7 +660,7 @@ function FetchDetail({ files, pr }: { files: File[]; pr: PrMeta }) {
           </div>
         ))}
         {files.length > 10 ? (
-          <p className="pt-1 text-[10px] text-faint">…还有 {files.length - 10} 个文件</p>
+          <p className="pt-1 text-[10px] text-faint">{t.agent.moreFilesNote(files.length - 10)}</p>
         ) : null}
       </div>
     </ToolCard>
@@ -655,24 +681,28 @@ interface BudgetView {
   estimated: boolean; // true = 后端真值缺失时的粗估
 }
 
-const BUDGET_LABELS = {
-  L1: "diff hunk + PR meta",
-  L2: "变更文件 / 受影响函数",
-  L3: "项目约定（README/CLAUDE.md）",
-  L4: "RAG 召回（跨文件相关代码）",
-} as const;
+// budgetLabels: L1 is an API/format term (kept as-is); L2-L4 are user-facing copy, so they come from the dictionary
+function budgetLabels(t: Dict) {
+  return {
+    L1: "diff hunk + PR meta",
+    L2: t.agent.budgetLabelL2,
+    L3: t.agent.budgetLabelL3,
+    L4: t.agent.budgetLabelL4,
+  } as const;
+}
 
-// fromBudgetReport 后端真值（budget_report SSE 帧 / cached detail）→ 渲染形状
-// L4 只在 used_l4 > 0 时显示，避免没开 RAG 的旧 review 多出空条
-function fromBudgetReport(b: BudgetReport): BudgetView {
+// fromBudgetReport: backend truth (budget_report SSE frame / cached detail) -> render shape
+// L4 only shows when used_l4 > 0, so older reviews without RAG don't get an empty row
+function fromBudgetReport(b: BudgetReport, t: Dict): BudgetView {
+  const labels = budgetLabels(t);
   const items: BudgetItem[] = [
-    { layer: "L1", label: BUDGET_LABELS.L1, tok: b.used_l1, className: "bg-info" },
-    { layer: "L2", label: BUDGET_LABELS.L2, tok: b.used_l2, className: "bg-ok" },
-    { layer: "L3", label: BUDGET_LABELS.L3, tok: b.used_l3, className: "bg-med" },
+    { layer: "L1", label: labels.L1, tok: b.used_l1, className: "bg-info" },
+    { layer: "L2", label: labels.L2, tok: b.used_l2, className: "bg-ok" },
+    { layer: "L3", label: labels.L3, tok: b.used_l3, className: "bg-med" },
   ];
   const l4 = b.used_l4 ?? 0;
   if (l4 > 0) {
-    items.push({ layer: "L4", label: BUDGET_LABELS.L4, tok: l4, className: "bg-l4" });
+    items.push({ layer: "L4", label: labels.L4, tok: l4, className: "bg-l4" });
   }
   return {
     items,
@@ -682,9 +712,10 @@ function fromBudgetReport(b: BudgetReport): BudgetView {
   };
 }
 
-// estimateBudget 粗估：仅在后端真值未到（流式首字节前 / 旧缓存）时兜底
-// L2 = patch 字节数 / 3（与后端 estimateTokens 同算法）；L1/L3 经验值
-function estimateBudget(_pr: PrMeta, files: File[]): BudgetView {
+// estimateBudget: rough fallback used only before the backend truth arrives (pre-first-byte streaming / old cache)
+// L2 = patch byte count / 3 (same algorithm as the backend's estimateTokens); L1/L3 are empirical constants
+function estimateBudget(_pr: PrMeta, files: File[], t: Dict): BudgetView {
+  const labels = budgetLabels(t);
   let patchChars = 0;
   for (const f of files) patchChars += f.patch?.length ?? 0;
   const l2 = Math.max(200, Math.round(patchChars / 3));
@@ -692,9 +723,9 @@ function estimateBudget(_pr: PrMeta, files: File[]): BudgetView {
   const l3 = Math.min(1600, Math.round((l1 + l2) / 12));
   return {
     items: [
-      { layer: "L1", label: BUDGET_LABELS.L1, tok: l1, className: "bg-info" },
-      { layer: "L2", label: BUDGET_LABELS.L2, tok: l2, className: "bg-ok" },
-      { layer: "L3", label: BUDGET_LABELS.L3, tok: l3, className: "bg-med" },
+      { layer: "L1", label: labels.L1, tok: l1, className: "bg-info" },
+      { layer: "L2", label: labels.L2, tok: l2, className: "bg-ok" },
+      { layer: "L3", label: labels.L3, tok: l3, className: "bg-med" },
     ],
     total: l1 + l2 + l3,
     dropped: [],
@@ -702,15 +733,18 @@ function estimateBudget(_pr: PrMeta, files: File[]): BudgetView {
   };
 }
 
-function ContextDetail({ budget }: { budget: BudgetView }) {
+function ContextDetail({ budget, t }: { budget: BudgetView; t: Dict }) {
   const hasL4 = budget.items.some((b) => b.layer === "L4");
   const ratio = hasL4 ? "L1:L2:L3:L4 ≈ 3:4:1:2" : "L1:L2:L3 ≈ 4:5:1";
   return (
     <ToolCard
       label={
         <>
-          token 预算 · {ratio} · 合计 {(budget.total / 1000).toFixed(1)}K
-          {budget.estimated ? <span className="text-faint"> · 粗估</span> : null}
+          {t.agent.contextBudgetLabelPrefix}
+          {ratio}
+          {t.agent.contextBudgetTotalLabel}
+          {(budget.total / 1000).toFixed(1)}K
+          {budget.estimated ? <span className="text-faint">{t.agent.roughEstimateBadge}</span> : null}
         </>
       }
     >
@@ -747,7 +781,7 @@ function ContextDetail({ budget }: { budget: BudgetView }) {
       </div>
       {budget.dropped.length > 0 ? (
         <div className="mt-2 border-t border-dashed border-border pt-2 text-[10.5px] text-muted">
-          <span className="font-medium text-high">超预算丢弃</span>
+          <span className="font-medium text-high">{t.agent.overBudgetDroppedLabel}</span>
           <span className="ml-1.5 font-mono text-faint">
             {budget.dropped.slice(0, 3).join(" · ")}
             {budget.dropped.length > 3 ? ` …+${budget.dropped.length - 3}` : ""}
@@ -766,6 +800,7 @@ function LlmDetail({
   risksDone,
   suggestionsDone,
   streaming,
+  t,
 }: {
   summary: string;
   risks: Risk[];
@@ -774,9 +809,10 @@ function LlmDetail({
   risksDone: boolean;
   suggestionsDone: boolean;
   streaming: boolean;
+  t: Dict;
 }) {
-  // 三泳道：summary / risks / suggestions
-  // 状态：running 期间未完成 → "running"；完成 → "done"；上游未启 → "pending"
+  // Three lanes: summary / risks / suggestions
+  // Status: not yet done while running -> "running"; done -> "done"; not started upstream -> "pending"
   const stage = (done: boolean, started: boolean): StepStatus =>
     done ? "done" : started ? "running" : "pending";
   const summaryStage: StepStatus =
@@ -785,27 +821,30 @@ function LlmDetail({
     <ToolCard
       label={
         <>
-          <Sparkle className="h-3 w-3" fill="currentColor" /> fan-out · 3 阶段并行（不共享上下文，降低相互污染）
+          <Sparkle className="h-3 w-3" fill="currentColor" /> {t.agent.llmFanOutLabel}
         </>
       }
     >
       <Lane
         icon={<AlignLeft className="h-3 w-3" />}
-        label="总结"
+        label={t.review.stageSummary}
         status={summaryStage}
-        result={summaryStage === "done" ? "已到达" : ""}
+        result={summaryStage === "done" ? t.agent.arrivedLabel : ""}
+        t={t}
       />
       <Lane
         icon={<AlertTriangle className="h-3 w-3" />}
-        label="风险识别"
+        label={t.review.risksPanelTitle}
         status={stage(risksDone, hasSummary)}
-        result={risksDone ? `${risks.length} 项` : ""}
+        result={risksDone ? t.agent.itemsCount(risks.length) : ""}
+        t={t}
       />
       <Lane
         icon={<Sparkle className="h-3 w-3" />}
-        label="行内建议"
+        label={t.agent.laneSuggestionsLabel}
         status={stage(suggestionsDone, risksDone)}
-        result={suggestionsDone ? `${suggestions.length} 条` : ""}
+        result={suggestionsDone ? t.agent.suggestionsCountLabel(suggestions.length) : ""}
+        t={t}
       />
       {summary ? (
         <div className="mt-2 max-h-[400px] overflow-y-auto border-t border-dashed border-border pt-2.5 pr-1 text-sm leading-relaxed text-text-2 [&_code]:rounded [&_code]:bg-surface-2 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[11px] [&_h1]:mt-2 [&_h1]:text-[13px] [&_h1]:font-semibold [&_h2]:mt-2 [&_h2]:text-xs [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:text-xs [&_h3]:font-semibold [&_li]:my-0.5 [&_p]:my-1.5 [&_strong]:font-medium [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4">
@@ -839,11 +878,13 @@ function Lane({
   label,
   status,
   result,
+  t,
 }: {
   icon: React.ReactNode;
   label: string;
   status: StepStatus;
   result?: string;
+  t: Dict;
 }) {
   return (
     <div className="flex items-center gap-2 py-[7px]">
@@ -866,21 +907,25 @@ function Lane({
         {label}
       </span>
       <span className="ml-auto font-mono text-[10.5px] text-faint">
-        {status === "done" ? result : status === "running" ? "流式生成…" : "排队"}
+        {status === "done"
+          ? result
+          : status === "running"
+            ? t.agent.streamingEllipsisLabel
+            : t.agent.queuedLabel}
       </span>
     </div>
   );
 }
 
-function CacheDetail({ pr }: { pr: PrMeta }) {
+function CacheDetail({ pr, t }: { pr: PrMeta; t: Dict }) {
   return (
-    <ToolCard label="SQLite · 写入缓存">
+    <ToolCard label={t.agent.cacheCardLabel}>
       <code className="font-mono text-xs text-text-2">
         key = <span className="text-info">{pr.owner}/{pr.repo}</span>:
         <span className="text-ok">{pr.pr}</span>:
         <span className="text-med">{pr.head_sha.slice(0, 11)}</span>
       </code>
-      <div className="mt-1.5 text-xs text-muted">head_sha 不变时下次秒回。</div>
+      <div className="mt-1.5 text-xs text-muted">{t.agent.cacheHintNote}</div>
     </ToolCard>
   );
 }
@@ -889,18 +934,21 @@ function FinalCard({
   pr: _pr,
   risks,
   suggestions,
+  t,
 }: {
   pr: PrMeta;
   risks: Risk[];
   suggestions: Suggestion[];
+  t: Dict;
 }) {
   return (
     <div className="pl-[38px]">
       <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-surface px-3.5 py-2.5">
         <Check className="h-4 w-4 text-ok" strokeWidth={2.4} />
-        <span className="text-sm font-semibold">评审完成</span>
+        <span className="text-sm font-semibold">{t.agent.reviewCompleteLabel}</span>
         <span className="text-xs text-muted">
-          总结 + {risks.length} 风险 + {suggestions.length} 建议
+          {t.review.stageSummary} + {t.agent.riskCountPhrase(risks.length)} +{" "}
+          {t.agent.suggestionCountPhrase(suggestions.length)}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-2.5 font-mono text-[10.5px] text-faint">
@@ -908,24 +956,26 @@ function FinalCard({
           <Sparkle className="h-[11px] w-[11px] text-accent" fill="currentColor" />
           DeepSeek · deepseek-chat <span className="text-med">(mock)</span>
         </span>
-        <span>· 上下文已含 README / CLAUDE.md</span>
+        <span>{t.agent.contextIncludesNote}</span>
       </div>
     </div>
   );
 }
 
-// SteerComposer 底部「引导」输入条；纯 UI 组件——发送 / 状态机由父级 AgentSessionView 持有。
-// disabled = streaming 模式（reviewId 未知）；inFlight = 父级正在跑一次引导
+// SteerComposer: the bottom "steer" input bar; pure UI component — send / state machine lives in the parent AgentSessionView
+// disabled = streaming mode (reviewId unknown); inFlight = parent is currently running a steer request
 function SteerComposer({
   pr,
   disabled,
   inFlight,
   onSend,
+  t,
 }: {
   pr: PrMeta;
   disabled: boolean;
   inFlight: boolean;
   onSend: (text: string, stage: "risks" | "suggestions", mode: SteerMode) => void;
+  t: Dict;
 }) {
   const [text, setText] = useState("");
   const [stage, setStage] = useState<"risks" | "suggestions">("risks");
@@ -954,7 +1004,7 @@ function SteerComposer({
               </>
             ) : null}
           </span>
-          {/* 模式切换：stage（重跑 risks/suggestions）/ agent（跑 ReAct loop 调工具） */}
+          {/* Mode switch: stage (rerun risks/suggestions) / agent (run the ReAct loop with tool calls) */}
           <div className="flex gap-[3px] rounded-md border border-border bg-surface-2 p-[2px]">
             {(["stage", "agent"] as const).map((m) => (
               <button
@@ -967,11 +1017,11 @@ function SteerComposer({
                   mode === m ? "bg-surface text-text" : "text-muted hover:text-text",
                 )}
               >
-                {m === "stage" ? "重跑 stage" : "agent 深挖"}
+                {m === "stage" ? t.agent.rerunStageLabel : t.agent.agentDeepDiveLabel}
               </button>
             ))}
           </div>
-          {/* stage 选择：仅 mode=stage 时显示；agent 模式跳过（不重跑 stage） */}
+          {/* Stage picker: only shown when mode=stage; agent mode skips it (doesn't rerun a stage) */}
           {mode === "stage" ? (
             <div className="flex gap-[3px] rounded-md border border-border bg-surface-2 p-[2px]">
               {(["risks", "suggestions"] as const).map((s) => (
@@ -985,7 +1035,7 @@ function SteerComposer({
                     stage === s ? "bg-surface text-text" : "text-muted hover:text-text",
                   )}
                 >
-                  {s === "risks" ? "重评风险" : "重出建议"}
+                  {t.agent.steerStageLabel(s)}
                 </button>
               ))}
             </div>
@@ -997,7 +1047,7 @@ function SteerComposer({
             className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-border-strong bg-surface px-2.5 text-xs text-text-2 hover:bg-surface-hover hover:text-text"
           >
             <ExternalLink className="h-3 w-3" />
-            查看 PR
+            {t.agent.viewPrLinkLabel}
           </a>
         </div>
         <div
@@ -1019,10 +1069,10 @@ function SteerComposer({
             rows={1}
             placeholder={
               disabled
-                ? "流式评审完成后可在此引导 agent"
+                ? t.agent.steerDisabledPlaceholder
                 : mode === "agent"
-                  ? "用 agent 深挖（例：去看看 main.go 里的并发是不是 race-free / grep 一下所有 TODO）…"
-                  : `引导 agent ${stage === "risks" ? "重评风险" : "重出建议"}（例：重点看并发安全 / 忽略 style 类问题）…`
+                  ? t.agent.steerAgentModePlaceholder
+                  : t.agent.steerStageModePlaceholder(stage)
             }
             className="max-h-[120px] min-w-0 flex-1 resize-none border-none bg-transparent px-1.5 py-1.5 text-sm leading-snug text-text outline-none placeholder:text-faint disabled:cursor-not-allowed"
           />

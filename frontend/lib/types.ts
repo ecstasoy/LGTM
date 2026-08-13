@@ -1,12 +1,12 @@
-// 前端与后端共享的类型
-// 字段命名与后端 JSON 一致（snake_case），避免转换
+// Types shared between frontend and backend.
+// Field names match the backend's JSON (snake_case) to avoid conversion.
 
 export interface Risk {
   file: string;
   line?: number;
   severity: "high" | "medium" | "low";
   category: "bug" | "security" | "perf" | "style" | "concurrency" | "breaking" | "other";
-  confidence: number; // 0-1，LLM 自评把握度；≥ 0.9 默认展开
+  confidence: number; // 0-1, the LLM's self-rated confidence; >= 0.9 expands by default
   reason: string;
 }
 
@@ -16,7 +16,7 @@ export interface Patch {
   after: string;
 }
 
-// File PR 改动文件；raw unified diff text 在 patch 字段
+// File: a changed file in the PR; the raw unified diff text lives in the patch field.
 export interface File {
   path: string;
   status: "added" | "modified" | "removed" | "renamed";
@@ -31,10 +31,10 @@ export interface Suggestion {
   type: "bug" | "style" | "perf" | "security" | "concurrency";
   title: string;
   body: string;
-  patch?: Patch | null; // LLM 给不出具体代码改写时为 null / 省略
+  patch?: Patch | null; // null/omitted when the LLM can't produce a concrete code rewrite
 }
 
-// Stats PR 体量统计
+// Stats: PR size stats.
 export interface Stats {
   files: number;
   additions: number;
@@ -43,16 +43,16 @@ export interface Stats {
   comments: number;
 }
 
-// Check 单个 CI 检查项
+// Check: a single CI check run.
 export interface Check {
   name: string;
-  status: "passing" | "failing" | "pending" | string; // 容忍未知
+  status: "passing" | "failing" | "pending" | string; // tolerate unknown values
   duration_ms: number;
-  note?: string; // check-run output.summary（如 coverage "82.4% (-0.3%)"）
+  note?: string; // check-run output.summary (e.g. coverage "82.4% (-0.3%)")
 }
 
-// PrMeta 评审 SSE pr 事件 / detail 共享的 PR 元信息
-// 字段对齐 gh.PullRequest (A1/A2/A3/author_role PR) 经 prMetaPayload + cachedPayload 透出的形状
+// PrMeta: PR metadata shared by the review SSE `pr` event and the detail endpoint.
+// Fields align with gh.PullRequest (A1/A2/A3/author_role PR), surfaced via prMetaPayload + cachedPayload.
 export interface PrMeta {
   id: string;
   owner: string;
@@ -71,22 +71,23 @@ export interface PrMeta {
   stats?: Stats;
   ci?: "passing" | "failing" | "pending" | string;
   checks?: Check[];
-  // source 仅 detail 端点会返；前端用来在顶栏渲染 ⚡ 自动 chip
-  // streaming 期间 onPr 不带，所以 optional
+  // source is only returned by the detail endpoint; the frontend uses it to render the top-bar auto-review chip.
+  // Not sent during streaming, so it's optional.
   source?: "manual" | "webhook";
 }
 
-// BudgetReport 三层上下文 token 预算实际分配；后端 prctx.LayeredBuilder 输出 + SSE budget_report 帧 + detail.budget_report 同形状
+// BudgetReport: the three-layer context's actual token budget allocation; the backend's
+// prctx.LayeredBuilder output, shared by the SSE budget_report frame and detail.budget_report.
 export interface BudgetReport {
   token_limit: number;
   used_l1: number;
   used_l2: number;
   used_l3: number;
-  used_l4?: number; // v3 RAG 才用
-  dropped?: string[]; // 因预算丢弃全文的文件路径
+  used_l4?: number; // only used by v3 RAG
+  dropped?: string[]; // file paths dropped entirely for budget reasons
 }
 
-// ReviewSummary /api/reviews 列表项；不含 payload
+// ReviewSummary: an /api/reviews list item; does not include the payload.
 export interface ReviewSummary {
   id: string;
   owner: string;
@@ -94,18 +95,18 @@ export interface ReviewSummary {
   pr: number;
   head_sha: string;
   title?: string;
-  created_at: string; // RFC3339（评审记录创建时间）
+  created_at: string; // RFC3339 (when the review record was created)
   ci?: string;
-  lang?: string; // PR 主语言（Go / TypeScript / Python / …）；后端按文件后缀多数派算
-  source?: "manual" | "webhook"; // webhook 触发的自动评审；列表渲染 ⚡ chip
-  created_by?: string; // GitHub login；空 = 匿名遗留；前端用来 gate 删除按钮
+  lang?: string; // the PR's primary programming language (Go / TypeScript / Python / …); the backend picks the majority by file extension
+  source?: "manual" | "webhook"; // webhook-triggered auto review; the list renders an auto chip
+  created_by?: string; // GitHub login; empty means an anonymous legacy record; the frontend uses this to gate the delete button
   risk_counts?: { high: number; medium: number; low: number };
 }
 
-// ReviewDetail /api/reviews/:id 详情；inline 缓存 payload + 全套 PR meta
-// 注意：source 通过 ReviewSummary 继承；前端可直接 detail.source 读
+// ReviewDetail: an /api/reviews/:id detail response; the inline-cached payload plus the full PR meta.
+// Note: source is inherited via ReviewSummary; the frontend can read detail.source directly.
 export interface ReviewDetail extends ReviewSummary {
-  // PR meta（A1+A2+A3+author_role+lang）
+  // PR meta (A1+A2+A3+author_role+lang)
   author?: string;
   author_role?: string;
   state?: string;
@@ -123,7 +124,7 @@ export interface ReviewDetail extends ReviewSummary {
   budget_report?: BudgetReport;
 }
 
-// 兼容旧导出（lib/api.ts ReviewResult 类型已无主动消费者）
+// Legacy export kept for compatibility (lib/api.ts's ReviewResult type has no active consumers).
 export interface ReviewResult {
   id: string;
   owner: string;
@@ -137,12 +138,12 @@ export interface ReviewResult {
   suggestions?: Suggestion[];
 }
 
-// AgentToolCall agent loop 单次工具调用（与后端 SSE tool_call_start/done 帧 data 字段对应）
+// AgentToolCall: a single agent-loop tool call (matches the backend SSE tool_call_start/done frame's data field).
 export interface AgentToolCall {
   id: string;
   name: string;
-  arguments?: string; // start 帧含；done 帧不重复
-  result?: string;    // done 帧含；含 "error: ..." 字符串
+  arguments?: string; // present on the start frame; not repeated on the done frame
+  result?: string;    // present on the done frame; may contain an "error: ..." string
 }
 
 export type EventType =

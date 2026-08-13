@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Dict } from "./i18n/dictionaries/zh";
 
-// PermsResponse /api/perms 返回；同后端 api.PermsResponse
+// PermsResponse: shape returned by /api/perms; mirrors the backend's api.PermsResponse.
 export interface PermsResponse {
   authenticated: boolean;
   permission?: string;
@@ -11,14 +12,23 @@ export interface PermsResponse {
   reason?: string;
 }
 
-// usePerms 拉指定 repo 的执行权限；owner/repo 为空时跳过 fetch
-// 不长期缓存：每次进入 review 页拉一次足够；登录态变更也由父组件 force remount
-export function usePerms(owner?: string, repo?: string): {
+// usePerms fetches the current user's permissions for the given repo; skips the fetch when owner/repo is empty.
+// Not cached long-term: one fetch per review-page visit is enough, and auth changes are handled
+// by the parent forcing a remount.
+export function usePerms(
+  owner: string | undefined,
+  repo: string | undefined,
+  t: Dict,
+): {
   perms: PermsResponse | null;
   loading: boolean;
 } {
   const [perms, setPerms] = useState<PermsResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  // Read via ref (not a useEffect dependency) so a locale switch mid-fetch doesn't retrigger the
+  // request, but the eventual error fallback still uses whichever dictionary is current when it fires.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   useEffect(() => {
     if (!owner || !repo) {
@@ -39,7 +49,7 @@ export function usePerms(owner?: string, repo?: string): {
             authenticated: false,
             can_comment: false,
             can_commit: false,
-            reason: "权限查询失败（网络错）",
+            reason: tRef.current.errors.permsFetchFailed,
           });
         }
       })

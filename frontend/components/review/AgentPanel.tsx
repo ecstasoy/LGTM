@@ -16,6 +16,8 @@ import { streamSteer } from "@/lib/sse";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { Spinner } from "@/components/ui/spinner";
+import { useT } from "@/lib/i18n/context";
+import type { Dict } from "@/lib/i18n/dictionaries/zh";
 
 // chatProse 聊天气泡内 markdown 排版：紧凑间距 + 小字号；与 SummaryCard 的宽松排版区分
 const chatProse =
@@ -48,13 +50,15 @@ interface Msg {
 // 接 streamSteer mode=agent：每次提问跑 agent.Run loop；
 // SSE tool_call_start/done → 在 chat 内插 tool message；info（"Agent 完成..."）→ assistant message。
 export function AgentPanel({ onClose, reviewId }: Props) {
-  const [msgs, setMsgs] = useState<Msg[]>([
-    {
-      role: "assistant",
-      text:
-        "我是 LGTM Agent。基于本次评审的 diff、风险与项目约定，可以继续追问任何代码细节、设计权衡或建议落地方式。",
-    },
-  ]);
+  const t = useT();
+  // The greeting is NOT seeded into msgs: it's rendered straight from t.agent.introMessage below,
+  // so it re-localizes immediately if the user toggles the language while the panel stays open.
+  // Persisting it into state would freeze it in whatever locale was active at mount.
+  const [msgs, setMsgs] = useState<Msg[]>([]);
+  // Mutated on every render, read only when streamSteer's async path actually throws — so an
+  // in-flight steer request picks up a locale change without needing to be restarted.
+  const tRef = useRef(t);
+  tRef.current = t;
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const inFlightRef = useRef(false);
@@ -145,6 +149,7 @@ export function AgentPanel({ onClose, reviewId }: Props) {
             setMsgs((m) => [...m, { role: "assistant", text: `❌ ${msg}` }]);
           },
         },
+        tRef,
         controller.signal,
         "agent",
       );
@@ -159,11 +164,9 @@ export function AgentPanel({ onClose, reviewId }: Props) {
     }
   }
 
-  const chips = ["这个锁改动安全吗？", "采样命中率会下降吗？", "帮我写一条 review 评论"];
+  const chips = t.agent.suggestedChips;
   const enabled = !!reviewId && !thinking;
-  const placeholder = reviewId
-    ? "针对这个 PR 提问，agent 会自动调工具…"
-    : "流式评审完成后可在此追问";
+  const placeholder = reviewId ? t.agent.panelPlaceholderActive : t.agent.panelPlaceholderDisabled;
 
   function handleClose() {
     abortControllerRef.current?.abort();
@@ -176,7 +179,7 @@ export function AgentPanel({ onClose, reviewId }: Props) {
         <span className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md bg-accent text-accent-fg">
           <Sparkle className="h-[13px] w-[13px]" fill="currentColor" />
         </span>
-        <span className="text-sm font-semibold">追问这个 PR</span>
+        <span className="text-sm font-semibold">{t.agent.panelTitle}</span>
         <span className="rounded-full border border-border bg-surface-2 px-1.5 py-px font-mono text-[10px] text-faint">
           agent
         </span>
@@ -184,16 +187,17 @@ export function AgentPanel({ onClose, reviewId }: Props) {
           type="button"
           onClick={handleClose}
           className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-text"
-          aria-label="关闭"
+          aria-label={t.agent.closeAriaLabel}
         >
           <PanelRight className="h-4 w-4" />
         </button>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3.5 py-1.5">
+        <AgentMessage msg={{ role: "assistant", text: t.agent.introMessage }} />
         {msgs.map((m, i) =>
           m.role === "tool" ? (
-            <ToolMessage key={i} msg={m} />
+            <ToolMessage key={i} msg={m} t={t} />
           ) : (
             <AgentMessage key={i} msg={m} />
           ),
@@ -264,7 +268,7 @@ export function AgentPanel({ onClose, reviewId }: Props) {
           </button>
         </div>
         <div className="mt-1.5 text-center text-[10px] text-faint">
-          上下文已含 diff / 风险 / 项目约定；agent 可调 read_file / list_dir / grep_patches
+          {t.agent.contextFooterNote}
         </div>
       </div>
     </aside>
@@ -321,12 +325,12 @@ function AgentMessage({ msg }: { msg: Msg }) {
   );
 }
 
-// ToolMessage 用一个低对比的小行展示 agent 的工具调用；不让它抢主对话视觉
-function ToolMessage({ msg }: { msg: Msg }) {
-  const t = msg.tool;
-  if (!t) return null;
-  const argsPreview = t.arguments?.slice(0, 80) ?? "";
-  const truncated = t.arguments && t.arguments.length > 80;
+// ToolMessage shows an agent tool call as a low-contrast, single line — kept out of the way of the main conversation
+function ToolMessage({ msg, t }: { msg: Msg; t: Dict }) {
+  const tool = msg.tool;
+  if (!tool) return null;
+  const argsPreview = tool.arguments?.slice(0, 80) ?? "";
+  const truncated = tool.arguments && tool.arguments.length > 80;
   return (
     <div className="flex gap-2 py-1.5">
       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted">
@@ -334,14 +338,14 @@ function ToolMessage({ msg }: { msg: Msg }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[11px]">
-          {t.status === "running" ? (
+          {tool.status === "running" ? (
             <Spinner size="xs" className="text-accent" />
-          ) : t.status === "error" ? (
+          ) : tool.status === "error" ? (
             <AlertTriangle className="h-3 w-3 text-high" />
           ) : (
             <Check className="h-3 w-3 text-ok" strokeWidth={2.4} />
           )}
-          <code className="font-mono font-semibold">{t.name}</code>
+          <code className="font-mono font-semibold">{tool.name}</code>
           {argsPreview ? (
             <code className="min-w-0 truncate font-mono text-[10px] text-faint">
               {argsPreview}
@@ -349,19 +353,19 @@ function ToolMessage({ msg }: { msg: Msg }) {
             </code>
           ) : null}
         </div>
-        {t.result && t.status !== "running" ? (
+        {tool.result && tool.status !== "running" ? (
           <details className="mt-0.5 text-[10px]">
             <summary className="cursor-pointer text-faint hover:text-text">
-              {t.status === "error" ? "查看错误" : `查看结果 (${t.result.length} 字)`}
+              {tool.status === "error" ? t.agent.viewErrorLabel : t.agent.viewResultLabel(tool.result.length)}
             </summary>
             <pre
               className={cn(
                 "mt-1 max-h-[180px] overflow-y-auto whitespace-pre-wrap rounded border border-border bg-surface-2 p-1.5",
-                t.status === "error" ? "text-high" : "text-text-2",
+                tool.status === "error" ? "text-high" : "text-text-2",
               )}
             >
-              {t.result.slice(0, 800)}
-              {t.result.length > 800 ? `\n…（已截断 ${t.result.length - 800} 字）` : ""}
+              {tool.result.slice(0, 800)}
+              {tool.result.length > 800 ? t.agent.truncatedNote(tool.result.length - 800) : ""}
             </pre>
           </details>
         ) : null}

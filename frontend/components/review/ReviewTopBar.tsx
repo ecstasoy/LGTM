@@ -14,8 +14,10 @@ import type { PrMeta } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/BrandMark";
 import { CIStatus, type CIStatusValue } from "@/components/ui/ci-status";
+import { LocaleToggle } from "@/components/LocaleToggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/auth/UserMenu";
+import { useT } from "@/lib/i18n/context";
 import { AdoptCountChip } from "./AdoptCountChip";
 import { StageChip, type StageState } from "./StageChip";
 
@@ -43,18 +45,19 @@ export function ReviewTopBar({
   onToggleAgent,
   agentOpen,
 }: Props) {
+  const t = useT();
   const githubURL = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.pr}`;
   return (
     <header className="flex h-[52px] flex-shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:gap-3 sm:px-3.5">
-      <Link href="/" className="flex items-center" aria-label="LGTM 首页">
+      <Link href="/" className="flex items-center" aria-label={t.review.homeAriaLabel}>
         <BrandMark size={24} variant="icon" />
       </Link>
       <span className="h-[22px] w-px shrink-0 bg-border" aria-hidden />
       <button
         type="button"
         onClick={onSidebarToggle}
-        title="切换侧栏"
-        aria-label="切换侧栏"
+        title={t.review.toggleSidebar}
+        aria-label={t.review.toggleSidebar}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-text"
       >
         <PanelLeftClose className="h-4 w-4" />
@@ -80,9 +83,9 @@ export function ReviewTopBar({
           {pr.source === "webhook" ? (
             <span
               className="ml-1 inline-flex h-[16px] items-center gap-0.5 rounded-full bg-accent-soft px-1.5 text-[10px] font-medium text-accent"
-              title="GitHub webhook 自动触发评审"
+              title={t.review.webhookAutoTitle}
             >
-              ⚡ 自动
+              {t.review.webhookAutoBadge}
             </span>
           ) : null}
         </div>
@@ -92,9 +95,9 @@ export function ReviewTopBar({
 
       {view !== "session" ? (
         <div className="hidden items-center gap-3.5 pr-1.5 pl-3 lg:flex">
-          <StageChip label="总结" state={stageStates.summary} />
-          <StageChip label="风险" state={stageStates.risks} />
-          <StageChip label="建议" state={stageStates.suggestions} />
+          <StageChip label={t.review.stageSummary} state={stageStates.summary} />
+          <StageChip label={t.review.stageRisks} state={stageStates.risks} />
+          <StageChip label={t.review.stageSuggestions} state={stageStates.suggestions} />
         </div>
       ) : null}
 
@@ -106,7 +109,7 @@ export function ReviewTopBar({
         className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border-strong bg-surface px-2.5 text-xs text-text-2 hover:bg-surface-hover hover:text-text"
       >
         <ExternalLink className="h-3 w-3" />
-        <span className="hidden sm:inline">查看原 PR</span>
+        <span className="hidden sm:inline">{t.review.viewOriginalPr}</span>
       </a>
       <button
         type="button"
@@ -119,9 +122,10 @@ export function ReviewTopBar({
         )}
       >
         <Sparkle className="h-3 w-3" fill={agentOpen ? "currentColor" : "none"} />
-        追问
+        {t.review.followUp}
       </button>
       <UserMenu />
+      <LocaleToggle />
       <ThemeToggle />
     </header>
   );
@@ -130,12 +134,13 @@ export function ReviewTopBar({
 // ViewSwitch 内联在 TopBar 里——3 个段：报告 / Diff / 会话；
 // 用 Next.js Link href=?view=... 持久化到 URL，scroll={false} 防滚动跳。
 function ViewSwitch({ view }: { view: ViewKey }) {
+  const t = useT();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const items: Array<{ key: ViewKey; label: string; icon: typeof AlignLeft }> = [
-    { key: "report", label: "报告", icon: AlignLeft },
+    { key: "report", label: t.review.viewSwitchReport, icon: AlignLeft },
     { key: "diff", label: "Diff", icon: FileCode2 },
-    { key: "session", label: "会话", icon: Sparkle },
+    { key: "session", label: t.review.viewSwitchSession, icon: Sparkle },
   ];
   return (
     <div className="flex shrink-0 gap-[3px] rounded-md border border-border bg-surface-2 p-[3px]">

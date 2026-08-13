@@ -18,6 +18,7 @@ import { CIStatus, type CIStatusValue } from "@/components/ui/ci-status";
 import { FileStatusBadge } from "@/components/ui/file-status-badge";
 import { Avatar } from "@/components/ui/avatar";
 import { SeverityBadge, CategoryBadge, type Category } from "@/components/ui/badge";
+import { useT } from "@/lib/i18n/context";
 
 interface Props {
   pr: PrMeta;
@@ -33,12 +34,13 @@ type TabKey = "files" | "risks" | "info";
 // Sidebar 评审页左侧 256px 栏，3 Tab：文件树 / 风险 / 信息。
 // 严格对齐 design 原型 Sidebar.jsx 的 markup 结构。
 export function Sidebar({ pr, files, risks, activeFile, onPickFile, onPickRisk }: Props) {
+  const t = useT();
   const [tab, setTab] = useState<TabKey>("files");
 
   const tabs: Array<{ key: TabKey; label: string; icon: typeof FileText; count: number | null }> = [
-    { key: "files", label: "文件", icon: FileText, count: files.length },
-    { key: "risks", label: "风险", icon: AlertTriangle, count: risks.length },
-    { key: "info", label: "信息", icon: GitBranch, count: null },
+    { key: "files", label: t.review.filesTabLabel, icon: FileText, count: files.length },
+    { key: "risks", label: t.review.stageRisks, icon: AlertTriangle, count: risks.length },
+    { key: "info", label: t.review.infoTabLabel, icon: GitBranch, count: null },
   ];
 
   return (
@@ -122,9 +124,10 @@ function FilesTab({
   activeFile?: string;
   onPick?: (path: string) => void;
 }) {
+  const t = useT();
   const tree = useMemo(() => buildTree(files), [files]);
   if (files.length === 0) {
-    return <p className="px-3 py-3 text-xs text-muted">无文件改动</p>;
+    return <p className="px-3 py-3 text-xs text-muted">{t.review.noFileChanges}</p>;
   }
   return (
     <div className="px-1.5 py-1.5">
@@ -215,8 +218,9 @@ function TreeNodeView({
 const SEV_RANK: Record<Risk["severity"], number> = { high: 0, medium: 1, low: 2 };
 
 function RisksTab({ risks, onPick }: { risks: Risk[]; onPick?: (r: Risk) => void }) {
+  const t = useT();
   if (risks.length === 0) {
-    return <p className="px-3 py-3 text-xs text-muted">未发现风险</p>;
+    return <p className="px-3 py-3 text-xs text-muted">{t.review.sidebarNoRisksFound}</p>;
   }
   const sorted = [...risks].sort((a, b) => {
     const sevDiff = SEV_RANK[a.severity] - SEV_RANK[b.severity];
@@ -271,10 +275,11 @@ function RisksTab({ risks, onPick }: { risks: Risk[]; onPick?: (r: Risk) => void
 // ─────────────── Info tab ───────────────
 
 function InfoTab({ pr }: { pr: PrMeta }) {
+  const t = useT();
   return (
     <div className="px-3.5 py-2.5">
       {pr.author ? (
-        <InfoRow label="作者">
+        <InfoRow label={t.review.infoRowAuthor}>
           <span className="inline-flex items-center gap-1.5">
             <Avatar
               name={pr.author}
@@ -283,13 +288,13 @@ function InfoTab({ pr }: { pr: PrMeta }) {
             />
             <span className="font-mono text-text-2">{pr.author}</span>
             {pr.author_role ? (
-              <span className="text-[10px] text-faint">{formatAuthorRole(pr.author_role)}</span>
+              <span className="text-[10px] text-faint">{formatAuthorRole(pr.author_role, t)}</span>
             ) : null}
           </span>
         </InfoRow>
       ) : null}
       {pr.head_ref || pr.base_ref ? (
-        <InfoRow label="分支">
+        <InfoRow label={t.review.infoRowBranch}>
           <span className="inline-flex flex-wrap items-center gap-1 font-mono text-[11px]">
             {pr.head_ref ? (
               <code className="rounded bg-surface-2 px-1.5 py-[1px]">{pr.head_ref}</code>
@@ -301,14 +306,14 @@ function InfoTab({ pr }: { pr: PrMeta }) {
           </span>
         </InfoRow>
       ) : null}
-      <InfoRow label="提交">
+      <InfoRow label={t.review.infoRowCommit}>
         <code className="font-mono text-[11px]">{pr.head_sha?.slice(0, 11)}</code>
         {pr.stats ? (
           <span className="ml-2 text-faint">· {pr.stats.commits} commits</span>
         ) : null}
       </InfoRow>
       {pr.labels && pr.labels.length > 0 ? (
-        <InfoRow label="标签">
+        <InfoRow label={t.review.infoRowLabels}>
           <span className="flex flex-wrap gap-1">
             {pr.labels.map((l) => (
               <span

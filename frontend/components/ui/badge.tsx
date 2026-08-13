@@ -3,8 +3,8 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
-// Badge 通用小标签，类似 shadcn/ui Badge。
-// SeverityBadge / CategoryBadge 是上面再包一层的语义化导出，把 Risk/Suggestion 的枚举值映射到色彩 token。
+// Badge: a generic small label, similar to shadcn/ui's Badge.
+// SeverityBadge / CategoryBadge wrap it with semantic exports that map Risk/Suggestion enum values to color tokens.
 const badgeVariants = cva(
   "inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs font-medium",
   {
@@ -27,7 +27,7 @@ export function Badge({ className, tone, ...props }: BadgeProps) {
   return <span className={cn(badgeVariants({ tone }), className)} {...props} />;
 }
 
-// ── 风险等级徽章 ──────────────────────────────────────────────
+// ── Risk severity badge ──────────────────────────────────────────
 export type Severity = "high" | "medium" | "low";
 
 const severityClass: Record<Severity, string> = {
@@ -64,10 +64,10 @@ export function SeverityBadge({
   );
 }
 
-// ── 类别徽章 ──────────────────────────────────────────────
-// bug / security / concurrency / breaking 高严重度（红）
-// perf 中（amber）
-// style / other 低（zinc）
+// ── Category badge ──────────────────────────────────────────────
+// bug / security / concurrency / breaking: high severity (red)
+// perf: medium (amber)
+// style / other: low (zinc)
 export type Category =
   | "bug"
   | "security"
@@ -91,7 +91,7 @@ export function CategoryBadge({
   category,
   className,
 }: {
-  category: Category | string; // 容忍未知值 → 走 other
+  category: Category | string; // tolerate unknown values → fall back to other
   className?: string;
 }) {
   const c = (

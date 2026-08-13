@@ -1,6 +1,9 @@
+"use client";
+
 import { FileCode2 } from "lucide-react";
 
 import type { File, Risk, Suggestion } from "@/lib/types";
+import { useT } from "@/lib/i18n/context";
 import { FileDiff } from "./FileDiff";
 
 interface Props {
@@ -23,10 +26,11 @@ export function DiffView({
   expandedFilePath,
   expandedFileNonce,
 }: Props) {
+  const t = useT();
   if (files.length === 0) {
     return (
       <section className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-muted">
-        该评审没有可显示的文件改动。
+        {t.diff.emptyState}
       </section>
     );
   }
@@ -68,7 +72,7 @@ export function DiffView({
     <div className="flex flex-col gap-3">
       <header className="flex items-center gap-2">
         <FileCode2 className="h-[15px] w-[15px] text-muted" />
-        <span className="text-sm font-semibold">变更文件</span>
+        <span className="text-sm font-semibold">{t.diff.header}</span>
         <span className="font-mono text-xs text-faint">
           {files.length} files · <span className="text-ok">+{totals.adds}</span>{" "}
           <span className="text-high">−{totals.dels}</span>
