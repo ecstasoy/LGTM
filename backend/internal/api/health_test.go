@@ -13,8 +13,8 @@ import (
 // failPingStore decorates a Store to make Ping fail; every other method delegates to inner
 type failPingStore struct{ inner store.Store }
 
-func (s failPingStore) Get(ctx context.Context, owner, repo string, pr int, headSHA string) (*store.Record, error) {
-	return s.inner.Get(ctx, owner, repo, pr, headSHA)
+func (s failPingStore) Get(ctx context.Context, owner, repo string, pr int, headSHA, locale string) (*store.Record, error) {
+	return s.inner.Get(ctx, owner, repo, pr, headSHA, locale)
 }
 func (s failPingStore) Put(ctx context.Context, r *store.Record) error { return s.inner.Put(ctx, r) }
 func (s failPingStore) List(ctx context.Context, userID *string, limit int) ([]*store.Record, error) {

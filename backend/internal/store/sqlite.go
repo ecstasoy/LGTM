@@ -14,6 +14,49 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+//go:embed indexes.sql
+var indexesSQL string
+
+// ensureLocaleColumn backfills reviews.locale on databases created before i18n.
+// SQLite has no ADD COLUMN IF NOT EXISTS, so probe the table first.
+func ensureLocaleColumn(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(reviews)")
+	if err != nil {
+		return fmt.Errorf("inspect reviews: %w", err)
+	}
+	defer rows.Close()
+
+	found := false
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notNull    int
+			dfltValue  sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &primaryKey); err != nil {
+			return fmt.Errorf("scan reviews column: %w", err)
+		}
+		if name == "locale" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect reviews: %w", err)
+	}
+	if found {
+		return nil
+	}
+
+	// Pre-i18n rows are all Chinese, so the DEFAULT doubles as the backfill value.
+	if _, err := db.ExecContext(ctx, "ALTER TABLE reviews ADD COLUMN locale TEXT NOT NULL DEFAULT 'zh'"); err != nil {
+		return fmt.Errorf("add reviews.locale: %w", err)
+	}
+	return nil
+}
+
 // SQLiteStore 单文件 SQLite 实现 Store。
 type SQLiteStore struct {
 	db *sql.DB
@@ -34,9 +77,19 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err := db.ExecContext(context.Background(), schemaSQL); err != nil {
+	// Three ordered phases; the order is load-bearing because the indexes reference locale.
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := ensureLocaleColumn(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.ExecContext(ctx, indexesSQL); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("apply indexes: %w", err)
 	}
 	return &SQLiteStore{db: db}, nil
 }
@@ -47,25 +100,25 @@ func (s *SQLiteStore) Close() error { return s.db.Close() }
 // Ping 走 database/sql 的 PingContext；ctx 超时即返错。
 func (s *SQLiteStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
-// Get 按 (owner, repo, pr_number, head_sha) 查缓存；未命中返 (nil, nil) 而非 error。
-func (s *SQLiteStore) Get(ctx context.Context, owner, repo string, pr int, headSHA string) (*Record, error) {
-	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+// Get 按 (owner, repo, pr_number, head_sha, locale) 查缓存；未命中返 (nil, nil) 而非 error。
+func (s *SQLiteStore) Get(ctx context.Context, owner, repo string, pr int, headSHA, locale string) (*Record, error) {
+	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 	           FROM reviews
-	           WHERE owner = ? AND repo = ? AND pr_number = ? AND head_sha = ? AND user_id IS NULL
+	           WHERE owner = ? AND repo = ? AND pr_number = ? AND head_sha = ? AND locale = ? AND user_id IS NULL
 	           LIMIT 1`
-	row := s.db.QueryRowContext(ctx, q, owner, repo, pr, headSHA)
+	row := s.db.QueryRowContext(ctx, q, owner, repo, pr, headSHA, normalizeLocale(locale))
 	return scanRecord(row)
 }
 
 // GetByID 按主键查；未命中返 (nil, nil)。
 func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*Record, error) {
-	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 	           FROM reviews WHERE id = ? LIMIT 1`
 	row := s.db.QueryRowContext(ctx, q, id)
 	return scanRecord(row)
 }
 
-// Put 写入或更新；冲突时按 (owner, repo, pr_number, head_sha) 复用既有 id 仅刷新 payload + 时间，
+// Put 写入或更新；冲突时按 (owner, repo, pr_number, head_sha, locale) 复用既有 id 仅刷新 payload + 时间，
 // 让前端的深链 id 在同 PR 重评后保持稳定。
 // r.ID 为空时调用方应预先 store.NewID() 填好（caller 持有 ID 才能立即写回 SSE）。
 func (s *SQLiteStore) Put(ctx context.Context, r *Record) error {
@@ -77,14 +130,15 @@ func (s *SQLiteStore) Put(ctx context.Context, r *Record) error {
 	} else {
 		r.CreatedAt = r.CreatedAt.UTC()
 	}
+	r.Locale = normalizeLocale(r.Locale)
 	const (
-		qPublic = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, payload, created_at)
-	           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	           ON CONFLICT(owner, repo, pr_number, head_sha) WHERE user_id IS NULL
+		qPublic = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at)
+	           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	           ON CONFLICT(owner, repo, pr_number, head_sha, locale) WHERE user_id IS NULL
 	           DO UPDATE SET payload = excluded.payload, created_at = excluded.created_at`
-		qUser = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, payload, created_at)
-	           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	           ON CONFLICT(user_id, owner, repo, pr_number, head_sha) WHERE user_id IS NOT NULL
+		qUser = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at)
+	           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	           ON CONFLICT(user_id, owner, repo, pr_number, head_sha, locale) WHERE user_id IS NOT NULL
 	           DO UPDATE SET payload = excluded.payload, created_at = excluded.created_at`
 	)
 	q := qPublic
@@ -92,7 +146,7 @@ func (s *SQLiteStore) Put(ctx context.Context, r *Record) error {
 		q = qUser
 	}
 	_, err := s.db.ExecContext(ctx, q,
-		r.ID, r.UserID, r.Owner, r.Repo, r.PRNumber, r.HeadSHA, []byte(r.Payload), r.CreatedAt.UnixNano(),
+		r.ID, r.UserID, r.Owner, r.Repo, r.PRNumber, r.HeadSHA, r.Locale, []byte(r.Payload), r.CreatedAt.UnixNano(),
 	)
 	return err
 }
@@ -104,9 +158,9 @@ func (s *SQLiteStore) List(ctx context.Context, userID *string, limit int) ([]*R
 		limit = 50
 	}
 	const (
-		qAll = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+		qAll = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 		         FROM reviews WHERE user_id IS NULL ORDER BY created_at DESC, rowid DESC LIMIT ?`
-		qUser = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+		qUser = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 		         FROM reviews WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`
 	)
 	var (
@@ -142,7 +196,7 @@ func scanRecord(row *sql.Row) (*Record, error) {
 		ts      int64
 		userID  sql.NullString
 	)
-	err := row.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &payload, &ts)
+	err := row.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &r.Locale, &payload, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -166,7 +220,7 @@ func scanRecordRows(rows *sql.Rows) (*Record, error) {
 		ts      int64
 		userID  sql.NullString
 	)
-	if err := rows.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &payload, &ts); err != nil {
+	if err := rows.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &r.Locale, &payload, &ts); err != nil {
 		return nil, err
 	}
 	if userID.Valid {

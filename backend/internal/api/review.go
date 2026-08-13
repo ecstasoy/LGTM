@@ -184,10 +184,11 @@ func PostReview(d Deps) gin.HandlerFunc {
 		writeSSE(c.Writer, "files", pr.Files)
 		c.Writer.Flush()
 
-		// cache hit: a complete result for the same (owner, repo, pr, head_sha) is replayed as-is, skipping the LLM
+		// cache hit: a complete result for the same (owner, repo, pr, head_sha, locale) is replayed as-is, skipping the LLM
 		// a non-default model sets useCache=false → skip the replay and force a rerun on the chosen model
+		// TODO(i18n): pass the per-request locale once the API negotiates it; until then every review is zh
 		if useCache && d.Store != nil {
-			if rec, gerr := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA); gerr != nil {
+			if rec, gerr := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(i18n.ZH)); gerr != nil {
 				slog.Warn("cache get failed; falling through to stages", "err", gerr)
 			} else if rec != nil {
 				var p cachedPayload
@@ -366,7 +367,9 @@ func persistReview(s store.Store, pr gh.PullRequest, summary string, risks, sugg
 		Repo:     pr.Repo,
 		PRNumber: pr.Number,
 		HeadSHA:  pr.HeadSHA,
-		Payload:  payload,
+		// TODO(i18n): carry the locale the review was actually generated in
+		Locale:  string(i18n.ZH),
+		Payload: payload,
 	}
 	// a non-empty UserID string → a real owner (per-user visibility + ownership check on delete)
 	// empty → an anonymous leftover (any logged-in user may delete it; kept for v1 records)

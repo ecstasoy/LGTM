@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/oauth"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/review"
@@ -53,10 +54,10 @@ type WebhookPR struct {
 type WebhookIssueComment struct {
 	Action string `json:"action"`
 	Issue  struct {
-		Number      int    `json:"number"`
-		HTMLURL     string `json:"html_url"`
-		Title       string `json:"title"`
-		User        struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+		Title   string `json:"title"`
+		User    struct {
 			Login string `json:"login"` // PR author; also notified when a slash command triggers the review
 		} `json:"user"`
 		PullRequest *struct {
@@ -358,9 +359,10 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		return
 	}
 
-	// idempotency check: an existing review for the same (owner, repo, pr, head_sha) → skip
+	// idempotency check: an existing review for the same (owner, repo, pr, head_sha, locale) → skip
+	// TODO(i18n): pass the webhook-configured locale once it exists; until then every review is zh
 	if d.Store != nil {
-		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA); rec != nil {
+		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(i18n.ZH)); rec != nil {
 			slog.Info("webhook: cache hit, skipping re-review", "review_id", rec.ID)
 			for _, login := range uniqueRecipients(args.SenderLogin, args.PRAuthorLogin) {
 				PushNotification(ctx, d.Cache, login, Notification{

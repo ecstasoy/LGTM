@@ -341,7 +341,7 @@ func TestPostReview_CacheMiss_PersistsResult(t *testing.T) {
 		t.Error("cache miss 应跑 stage，调用 Provider")
 	}
 
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestPostReview_StageError_SkipsCache(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
 	}
 
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}
@@ -663,7 +663,7 @@ func TestPostReview_CacheMiss_PersistsAllMetaFields(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
 	}
 
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}
@@ -710,7 +710,7 @@ func TestPostReview_CacheMiss_PersistsFiles(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
 	}
-	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef")
+	rec, err := s.Get(context.Background(), "golang", "go", 42, "deadbeef", store.DefaultLocale)
 	if err != nil {
 		t.Fatalf("store.Get: %v", err)
 	}

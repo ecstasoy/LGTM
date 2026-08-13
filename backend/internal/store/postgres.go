@@ -14,6 +14,9 @@ import (
 //go:embed postgres_schema.sql
 var postgresSchemaSQL string
 
+//go:embed postgres_indexes.sql
+var postgresIndexesSQL string
+
 // PostgresStore 实现 Store，跟 SQLiteStore 平行；
 // 与 SQLite 接口完全相同，main 接线层按 cfg.PostgresURL 是否非空决定走哪条。
 //
@@ -45,9 +48,15 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("postgres ping: %w", err)
 	}
+	// Two ordered phases; the order is load-bearing because the indexes reference locale.
+	// The locale backfill lives at the end of postgres_schema.sql: PG has ADD COLUMN IF NOT EXISTS.
 	if _, err := db.ExecContext(ctx, postgresSchemaSQL); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("postgres apply schema: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, postgresIndexesSQL); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("postgres apply indexes: %w", err)
 	}
 	return &PostgresStore{db: db}, nil
 }
@@ -58,19 +67,19 @@ func (s *PostgresStore) Close() error { return s.db.Close() }
 // Ping 走 database/sql 的 PingContext；readiness handler 用。
 func (s *PostgresStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
-// Get 按 (owner, repo, pr_number, head_sha) 查公开评审缓存；未命中返 (nil, nil)。
-func (s *PostgresStore) Get(ctx context.Context, owner, repo string, pr int, headSHA string) (*Record, error) {
-	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+// Get 按 (owner, repo, pr_number, head_sha, locale) 查公开评审缓存；未命中返 (nil, nil)。
+func (s *PostgresStore) Get(ctx context.Context, owner, repo string, pr int, headSHA, locale string) (*Record, error) {
+	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 	           FROM reviews
-	           WHERE owner = $1 AND repo = $2 AND pr_number = $3 AND head_sha = $4 AND user_id IS NULL
+	           WHERE owner = $1 AND repo = $2 AND pr_number = $3 AND head_sha = $4 AND locale = $5 AND user_id IS NULL
 	           LIMIT 1`
-	row := s.db.QueryRowContext(ctx, q, owner, repo, pr, headSHA)
+	row := s.db.QueryRowContext(ctx, q, owner, repo, pr, headSHA, normalizeLocale(locale))
 	return scanPgRecord(row)
 }
 
 // GetByID 按主键查；未命中返 (nil, nil)。
 func (s *PostgresStore) GetByID(ctx context.Context, id string) (*Record, error) {
-	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+	const q = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 	           FROM reviews WHERE id = $1 LIMIT 1`
 	row := s.db.QueryRowContext(ctx, q, id)
 	return scanPgRecord(row)
@@ -89,14 +98,15 @@ func (s *PostgresStore) Put(ctx context.Context, r *Record) error {
 	}
 	// PG 的 partial-index unique 约束，ON CONFLICT 需指定列表，按是否有 user_id 二选一
 	// （与 SQLiteStore 的 WHERE 条件保持一致）
+	r.Locale = normalizeLocale(r.Locale)
 	const (
-		qPublic = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, payload, created_at)
-		           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		           ON CONFLICT (owner, repo, pr_number, head_sha) WHERE user_id IS NULL
+		qPublic = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at)
+		           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		           ON CONFLICT (owner, repo, pr_number, head_sha, locale) WHERE user_id IS NULL
 		           DO UPDATE SET payload = EXCLUDED.payload, created_at = EXCLUDED.created_at`
-		qUser = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, payload, created_at)
-		           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		           ON CONFLICT (user_id, owner, repo, pr_number, head_sha) WHERE user_id IS NOT NULL
+		qUser = `INSERT INTO reviews (id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at)
+		           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		           ON CONFLICT (user_id, owner, repo, pr_number, head_sha, locale) WHERE user_id IS NOT NULL
 		           DO UPDATE SET payload = EXCLUDED.payload, created_at = EXCLUDED.created_at`
 	)
 	q := qPublic
@@ -104,7 +114,7 @@ func (s *PostgresStore) Put(ctx context.Context, r *Record) error {
 		q = qUser
 	}
 	_, err := s.db.ExecContext(ctx, q,
-		r.ID, r.UserID, r.Owner, r.Repo, r.PRNumber, r.HeadSHA, []byte(r.Payload), r.CreatedAt.UnixNano(),
+		r.ID, r.UserID, r.Owner, r.Repo, r.PRNumber, r.HeadSHA, r.Locale, []byte(r.Payload), r.CreatedAt.UnixNano(),
 	)
 	return err
 }
@@ -116,10 +126,10 @@ func (s *PostgresStore) List(ctx context.Context, userID *string, limit int) ([]
 		limit = 50
 	}
 	const (
-		qAll = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+		qAll = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 		         FROM reviews WHERE user_id IS NULL
 		         ORDER BY created_at DESC, id DESC LIMIT $1`
-		qUser = `SELECT id, user_id, owner, repo, pr_number, head_sha, payload, created_at
+		qUser = `SELECT id, user_id, owner, repo, pr_number, head_sha, locale, payload, created_at
 		         FROM reviews WHERE user_id = $1
 		         ORDER BY created_at DESC, id DESC LIMIT $2`
 	)
@@ -156,7 +166,7 @@ func scanPgRecord(row *sql.Row) (*Record, error) {
 		ts      int64
 		userID  sql.NullString
 	)
-	err := row.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &payload, &ts)
+	err := row.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &r.Locale, &payload, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -180,7 +190,7 @@ func scanPgRecordRows(rows *sql.Rows) (*Record, error) {
 		ts      int64
 		userID  sql.NullString
 	)
-	if err := rows.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &payload, &ts); err != nil {
+	if err := rows.Scan(&r.ID, &userID, &r.Owner, &r.Repo, &r.PRNumber, &r.HeadSHA, &r.Locale, &payload, &ts); err != nil {
 		return nil, err
 	}
 	if userID.Valid {
