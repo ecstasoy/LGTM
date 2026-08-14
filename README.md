@@ -240,7 +240,7 @@ The wiring point is `agent.RegisterDefaultsWithRAG` in `backend/internal/api/ste
 The recommended shape is a Fly.io backend plus a Vercel frontend:
 
 - The backend Docker image ships two binaries, `server` and `indexrepo`.
-- A Fly volume is mounted at `/data` for the SQLite review history and the RAG DB.
+- The deployed backend stores reviews in a Fly Postgres instance and caches in Fly Redis; a Fly volume at `/data` holds the RAG DB, and the SQLite store when no `POSTGRES_URL` is set.
 - The frontend is a Next.js standalone build; on Vercel, `BACKEND_URL` rewrites `/api/*` to the Fly backend.
 - SSE does not go through a Vercel server function. The browser connects straight to the backend through the rewrite, which avoids edge-function timeouts.
 
@@ -255,7 +255,7 @@ For the minimal set of deployment commands, see [`docs/DEPLOY.md`](./docs/DEPLOY
 - **An evaluation harness**: assemble a batch of PRs with ground truth and record false positives, false negatives, how often a suggestion can actually be applied, latency, and cost. Without evaluation it is hard to tell whether a model swap genuinely improved anything.
 - **More agent tools**: today it is the three PR-sandbox tools plus RAG `search_repo`. Symbol definitions, test results, CI logs, and remote file reads (allowlisted and rate-limited) could follow, but every tool needs a permission boundary and a call budget.
 - **Productizing the GitHub App**: the webhook spawns a goroutine directly today and only logs failures. A production version needs a queue, retries, idempotency keys, sticky comment updates, more slash commands, and a clearer installation state.
-- **Running multiple instances**: PostgresStore and RedisCache are implemented. What is still missing is a migration strategy, backups, metrics, quotas, and a per-user or per-organization visibility model.
+- **Running multiple instances**: PostgresStore and RedisCache are implemented and live in production, so review data and rate-limit counters are already shared. What still pins the deployment to one machine is the RAG DB on a local volume; that one needs pgvector or a hosted vector store. Also missing: a migration strategy, backups, metrics, quotas, and a per-user or per-organization visibility model.
 
 ## Third-party dependencies
 

@@ -240,7 +240,7 @@ Agent 追问也是同一套思路：先把 L1/L3/L4 注入 prompt，再让工具
 推荐部署形态是 Fly.io 后端 + Vercel 前端：
 
 - 后端 Docker 镜像包含 `server` 和 `indexrepo` 两个二进制。
-- Fly volume 挂 `/data`，用于 SQLite 评审历史和 RAG DB。
+- 线上后端评审数据存 Fly Postgres，缓存走 Fly Redis；Fly volume 挂 `/data`，存 RAG DB，以及没设 `POSTGRES_URL` 时的 SQLite 库。
 - 前端用 Next.js standalone 构建，Vercel 上通过 `BACKEND_URL` rewrite `/api/*` 到 Fly 后端。
 - SSE 不走 Vercel server function，而是浏览器经 rewrite 直连后端，避免边缘函数超时。
 
@@ -255,7 +255,7 @@ Agent 追问也是同一套思路：先把 L1/L3/L4 注入 prompt，再让工具
 - **评测 harness**：准备一批带 ground truth 的 PR，记录误报、漏报、建议可应用率、耗时和成本。没有评测就很难判断模型切换是否真的变好。
 - **Agent 工具扩展**：当前是 PR 沙盒三件套 + RAG `search_repo`。未来可以接符号定义、测试结果、CI 日志、远端文件读取（带白名单和 rate limit），但每个工具都要有权限边界和调用预算。
 - **GitHub App 产品化**：webhook 当前直接起 goroutine，失败只记日志。生产版需要队列、重试、幂等 key、sticky comment 更新、更多 slash command 和更清晰的安装状态。
-- **多实例运行**：PostgresStore、RedisCache 已经实现。进一步需要补迁移策略、备份、指标、配额和按用户/组织的可见性模型。
+- **多实例运行**：PostgresStore、RedisCache 已经实现并且线上在跑，评审数据和限流计数已经跨实例共享。真正还把部署钉在单机上的是落在本地卷上的 RAG DB，这块要换 pgvector 或托管向量库。此外还需要补迁移策略、备份、指标、配额和按用户/组织的可见性模型。
 
 ## 第三方依赖
 
