@@ -35,19 +35,21 @@ primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg /
     timeout = "3s"
     path = "/api/health/ready"
 
-# Volume：SQLite 文件挂载（重启 / 重部署不丢历史评审）
+# Volume: holds rag.db, plus reviews.db when no POSTGRES_URL secret is set (survives restart / redeploy)
 # 创建：`flyctl volumes create data --size 1 --region nrt`
 [mounts]
   source = "data"
   destination = "/data"
 
 # 默认 env（非敏感；secrets 走 `flyctl secrets set ...`）
+# The live app also has POSTGRES_URL and REDIS_URL set as secrets, which take priority over SQLITE_PATH
+# and the in-memory cache. This file alone does not tell you what production runs — check the secrets.
 [env]
   PORT = "8080"
   LLM_PROVIDER = "openai"
   OPENAI_BASE_URL = "https://api.deepseek.com"
   LLM_MODEL = "deepseek-chat"
-  SQLITE_PATH = "/data/reviews.db"
+  SQLITE_PATH = "/data/reviews.db"  # fallback only; the POSTGRES_URL secret wins when present
   # webhook auto-review has no user request to negotiate from, so this is the bot's review language
   DEFAULT_LOCALE = "en"
   ENVIRONMENT = "production"
