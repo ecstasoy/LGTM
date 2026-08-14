@@ -1,6 +1,7 @@
 # LGTM 部署指南（Fly.io 后端 + Vercel 前端）
 
 > 最小可行部署：**全免费档**够 demo。升级到 Postgres / Redis / OAuth / Sentry 见下方「升级路径」。
+> 现网 `lgtm-backend` 已经走完升级 1–3（Postgres + Redis + GitHub App），正文仍按从零部署写。
 > 部署时长：约 **15 分钟人工 + 10–15 分钟首次构建**。
 
 ---
@@ -31,7 +32,7 @@ flyctl launch --no-deploy --copy-config
 # 提示选 region：选 nrt（东京），跟 fly.toml 一致
 # 提示创建 Postgres / Redis：先选 No，本指南后面升级路径再加
 
-# 3. 创建持久卷（SQLite 文件用）
+# 3. 创建持久卷（SQLite 文件 + RAG 索引 rag.db 用；切 Postgres 后卷仍给 rag.db 用）
 flyctl volumes create data --size 1 --region nrt
 # 输出 "WARNING: single-volume" 是正常的；要高可用买第二个
 
@@ -129,7 +130,7 @@ A: Fly 内部 build push 偶发；重试 `flyctl deploy --remote-only`。
 
 ### Q: `/api/health/ready` 返 503
 
-A: 检查 store ping —— SQLite volume 没挂上。`flyctl volumes list` 看 data 卷是否 attached 到 machine。
+A: 检查 store ping。SQLite 部署看 `flyctl volumes list` 里 data 卷有没有 attached 到 machine；现网这种 Postgres 部署看 `flyctl status -a lgtm-pg` 和 `POSTGRES_URL` secret 是否还有效。
 
 ### Q: 前端请求 `/api/review` 返 404
 
@@ -147,9 +148,9 @@ A: Vercel 边缘函数对 SSE 超时。本项目走 Vercel rewrites 把 `/api/*`
 
 ## 升级路径
 
-按需开启。每项独立，互不阻塞。
+按需开启。每项独立，互不阻塞。升级 1–3 现网已开启，照抄即可复现。
 
-### 升级 1：Postgres 替 SQLite（推荐：多实例可用 + 数据持久 + 备份）
+### 升级 1：Postgres 替 SQLite（推荐：多实例可用 + 数据持久 + 备份）· 现网已开启
 
 ```bash
 flyctl postgres create --name lgtm-pg --region nrt --vm-size shared-cpu-1x --volume-size 1
@@ -159,9 +160,9 @@ flyctl secrets set POSTGRES_URL="$(flyctl ssh console -C 'printenv DATABASE_URL'
 flyctl deploy
 ```
 
-代码逻辑：`cfg.PostgresURL != "" → store.PostgresStore`（v3 后续 PR 实现）。
+代码逻辑：`cfg.PostgresURL != "" → store.PostgresStore`，否则 SQLite。连不上时只 warn 并降回 SQLite，所以设了 secret 不等于生效——认准启动日志的 `store ready type=postgres`。
 
-### 升级 2：Redis Cache（跨实例限流计数 + RAG 队列）
+### 升级 2：Redis Cache（跨实例限流计数 + RAG 队列）· 现网已开启
 
 ```bash
 flyctl redis create --name lgtm-redis --region nrt
@@ -169,9 +170,9 @@ flyctl secrets set REDIS_URL="$(flyctl redis status lgtm-redis -j | jq -r '.priv
 flyctl deploy
 ```
 
-代码：`cfg.RedisURL != "" → store.RedisCache`（v3 后续 PR 实现）。
+代码：`cfg.RedisURL != "" → store.RedisCache`，否则 MemoryCache。同样是失败降级，认准 `cache ready type=redis`。
 
-### 升级 3：GitHub App + OAuth（webhook 自动评 + 用户登录）
+### 升级 3：GitHub App + OAuth（webhook 自动评 + 用户登录）· 现网已开启
 
 照 [`docs/GITHUB_APP.md`](./GITHUB_APP.md) 申请 App，然后：
 
@@ -238,6 +239,11 @@ flyctl logs           # 实时日志
 flyctl status         # machine 状态
 flyctl metrics        # Prometheus 风格指标（自带）
 flyctl dashboard      # 浏览器看图表
+
+# 确认现网实际在用哪套存储（fly.toml 只有默认值，secrets 才是真相）
+flyctl secrets list
+curl -s https://lgtm-backend.fly.dev/api/health/ready   # min_machines_running=0，先唤醒
+flyctl logs --no-tail | grep -E "store ready|cache ready|retriever ready"
 ```
 
 Vercel：`vercel logs` 或 dashboard。
