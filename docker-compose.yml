@@ -4,8 +4,8 @@
 # 启动：docker compose up --build
 # 前端: http://localhost:3000  ·  后端: http://localhost:8080
 #
-# Postgres / Redis 占位（v3 主线①真部署用）：当前 backend 仍连 SQLite + 内存，
-# 这里把容器拉起来供未来 store.PostgresStore / store.RedisCache 接入
+# Postgres / Redis are wired up in production (Fly secrets) but stay opt-in here: local dev defaults to
+# SQLite + in-memory cache, and you get the deployed shape by uncommenting the two URLs on the backend.
 
 services:
   backend:
@@ -21,7 +21,7 @@ services:
       LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       SQLITE_PATH: /app/data/reviews.db
-      # v3 真部署时切上：
+      # Uncomment to mirror production (Postgres store + Redis cache):
       # POSTGRES_URL: postgres://lgtm:lgtm@postgres:5432/lgtm?sslmode=disable
       # REDIS_URL: redis://redis:6379/0
     volumes:
@@ -39,7 +39,7 @@ services:
       - backend
     restart: unless-stopped
 
-  # v3 主线①占位：业务还在 SQLite，PG 容器只起着等接入
+  # Local counterpart of the lgtm-pg Fly instance; idle until the backend gets POSTGRES_URL
   postgres:
     image: postgres:16-alpine
     container_name: lgtm-postgres
@@ -57,7 +57,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # v3 主线①占位：缓存 + rate limit 计数会接入
+  # Local counterpart of the lgtm-redis Fly instance; backs the cache + rate-limit counters
   redis:
     image: redis:7-alpine
     container_name: lgtm-redis
