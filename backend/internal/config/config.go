@@ -63,6 +63,13 @@ type Config struct {
 	// 空字符串（默认）表示不信任任何代理，直接取 RemoteAddr。
 	TrustedProxies string `env:"TRUSTED_PROXIES" envDefault:""`
 
+	// TrustedPlatform names a header the hosting platform sets to the real client IP
+	// (Fly-Client-IP on Fly, CF-Connecting-IP behind Cloudflare). When set it wins over
+	// TrustedProxies, which cannot express "the proxy is whatever 6PN address fronts us
+	// today". Leave empty anywhere the header is not injected by the platform itself:
+	// a client can forge it otherwise.
+	TrustedPlatform string `env:"TRUSTED_PLATFORM" envDefault:""`
+
 	// DefaultLocale is the single fallback for review output language: the last tier of the API's
 	// body > Accept-Language > default chain, and the value used by the webhook path, which has no user request.
 	DefaultLocale string `env:"DEFAULT_LOCALE" envDefault:"zh"`
