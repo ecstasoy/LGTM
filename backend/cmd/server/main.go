@@ -73,6 +73,14 @@ func main() {
 		}
 	}
 
+	// Client IP resolution feeds the rate limiter, so getting it wrong is not cosmetic:
+	// every request collapsing onto one proxy address turns a per-client limit into a
+	// single bucket shared by everyone. TrustedPlatform is checked first by gin.
+	if cfg.TrustedPlatform != "" {
+		r.TrustedPlatform = cfg.TrustedPlatform
+		slog.Info("client IP resolved from platform header", "header", cfg.TrustedPlatform)
+	}
+
 	// 配置受信代理：用于 c.ClientIP() 正确解析 X-Forwarded-For。
 	// 未配置时显式禁用代理信任，退回 RemoteAddr 解析。
 	if cfg.TrustedProxies == "" {
@@ -87,8 +95,12 @@ func main() {
 				proxies = append(proxies, p)
 			}
 		}
+		// Only IPs and CIDRs parse here. A hostname fails, leaves no trusted CIDR, and
+		// silently drops ClientIP back to RemoteAddr; log it as an error naming the
+		// consequence rather than a warning nobody reads.
 		if err := r.SetTrustedProxies(proxies); err != nil {
-			slog.Warn("set trusted proxies failed", "err", err)
+			slog.Error("trusted proxies rejected; X-Forwarded-For will be ignored and ClientIP falls back to RemoteAddr",
+				"trusted_proxies", cfg.TrustedProxies, "err", err)
 		}
 	}
 
