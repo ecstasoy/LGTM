@@ -53,8 +53,11 @@ primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg /
   # webhook auto-review has no user request to negotiate from, so this is the bot's review language
   DEFAULT_LOCALE = "en"
   ENVIRONMENT = "production"
-  # Fly 内部 6PN 反代 + Anycast 边缘；trust 之让 ClientIP 正确解析
-  TRUSTED_PROXIES = "fly-global-services"
+  # Rate limits key on ClientIP, so it must be the caller's IP and not fly-proxy's.
+  # SetTrustedProxies only accepts IPs/CIDRs and the 6PN address fronting us is not
+  # a fixed one, so read Fly's own header instead. Fly overwrites it on every inbound
+  # request, so it cannot be forged from outside.
+  TRUSTED_PLATFORM = "Fly-Client-IP"
 
   # RAG：rag.db 也落 volume 避免重启丢索引
   # RAG_SCOPE 非空 → 容器 entrypoint 自动后台跑 indexrepo 扫 /app/src 全仓预索引
