@@ -136,3 +136,60 @@ func TestRateLimit_NilCachePassThrough(t *testing.T) {
 		}
 	}
 }
+
+// The limiter keys on gin's ClientIP. Behind a platform proxy every request arrives
+// from the same proxy address, so without a trusted platform header all callers land
+// in one bucket and a single caller can 429 everyone else. This pair pins both halves.
+func TestRateLimit_PlatformHeaderIsolatesClientsBehindOneProxy(t *testing.T) {
+	r := gin.New()
+	r.TrustedPlatform = gin.PlatformFlyIO
+	cache := newTestCache(t)
+	r.Use(RateLimit(cache, RateLimitConfig{Name: "test", Window: time.Hour, Max: 1}))
+	r.GET("/x", func(c *gin.Context) { c.Status(200) })
+
+	// one proxy address in front, two distinct callers behind it
+	doReq := func(clientIP string) int {
+		req := httptest.NewRequest("GET", "/x", nil)
+		req.RemoteAddr = "10.9.9.9:1234"
+		req.Header.Set(gin.PlatformFlyIO, clientIP)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if got := doReq("203.0.113.1"); got != 200 {
+		t.Fatalf("client A first call should be 200, got %d", got)
+	}
+	if got := doReq("203.0.113.1"); got != 429 {
+		t.Fatalf("client A second call should be 429, got %d", got)
+	}
+	if got := doReq("203.0.113.2"); got != 200 {
+		t.Fatalf("client B first call should be 200, got %d (proxy collapsed both clients into one bucket)", got)
+	}
+}
+
+// Same setup with no platform header configured: both callers share the proxy's bucket.
+// This is the production behavior TRUSTED_PLATFORM exists to avoid, kept as a test so
+// dropping the setting shows up as a behavior change rather than silent degradation.
+func TestRateLimit_WithoutPlatformHeaderClientsShareOneBucket(t *testing.T) {
+	r := gin.New()
+	cache := newTestCache(t)
+	r.Use(RateLimit(cache, RateLimitConfig{Name: "test", Window: time.Hour, Max: 1}))
+	r.GET("/x", func(c *gin.Context) { c.Status(200) })
+
+	doReq := func(clientIP string) int {
+		req := httptest.NewRequest("GET", "/x", nil)
+		req.RemoteAddr = "10.9.9.9:1234"
+		req.Header.Set(gin.PlatformFlyIO, clientIP)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if got := doReq("203.0.113.1"); got != 200 {
+		t.Fatalf("client A first call should be 200, got %d", got)
+	}
+	if got := doReq("203.0.113.2"); got != 429 {
+		t.Fatalf("client B should be 429: without a platform header both clients key on the proxy IP, got %d", got)
+	}
+}
