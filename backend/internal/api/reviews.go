@@ -211,6 +211,15 @@ func DeleteReview(d Deps) gin.HandlerFunc {
 	}
 }
 
+// canViewReview reports whether the request may see rec: anonymous records are public, owned records owner-only.
+func canViewReview(c *gin.Context, rec *store.Record) bool {
+	if rec.UserID == nil {
+		return true
+	}
+	sess := CurrentSession(c)
+	return sess != nil && sess.Login == *rec.UserID
+}
+
 // GetReview GET /api/reviews/:id — fetch a detail by id; a payload parse failure surfaces as a 500 rather than degrading to an "empty review".
 func GetReview(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -235,14 +244,10 @@ func GetReview(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "corrupted cache payload"})
 			return
 		}
-		// visibility check: an anonymous leftover (UserID==nil) is visible to anyone; a non-empty UserID is owner-only
-		// keeps someone from guessing an ID in the URL and peeking at another person's private review
-		if rec.UserID != nil {
-			sess := CurrentSession(c)
-			if sess == nil || sess.Login != *rec.UserID {
-				c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
-				return
-			}
+		// 404 rather than 403 so a leaked or guessed ID doesn't confirm someone else's review exists
+		if !canViewReview(c, rec) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
+			return
 		}
 		createdBy := ""
 		if rec.UserID != nil {

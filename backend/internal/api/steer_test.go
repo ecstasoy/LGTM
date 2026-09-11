@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -12,12 +15,20 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
+	"github.com/ecstasoy/LGTM/backend/internal/memory"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
+	"github.com/ecstasoy/LGTM/backend/internal/session"
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
-// seedSteerReview writes a cached review for the steer tests: non-empty files + complete meta
+// seedSteerReview writes an anonymous cached review for the steer tests: non-empty files + complete meta
 func seedSteerReview(t *testing.T, s store.Store) string {
+	t.Helper()
+	return seedSteerReviewOwnedBy(t, s, nil)
+}
+
+// seedSteerReviewOwnedBy is seedSteerReview with the record owner's login set (nil = anonymous).
+func seedSteerReviewOwnedBy(t *testing.T, s store.Store, userID *string) string {
 	t.Helper()
 	payload, _ := json.Marshal(cachedPayload{
 		Title:   "fix race",
@@ -33,7 +44,7 @@ func seedSteerReview(t *testing.T, s store.Store) string {
 	id := store.NewID()
 	rec := &store.Record{
 		ID: id, Owner: "o", Repo: "r", PRNumber: 1, HeadSHA: "sha",
-		Payload: payload, CreatedAt: time.Unix(1000, 0),
+		Payload: payload, CreatedAt: time.Unix(1000, 0), UserID: userID,
 	}
 	if err := s.Put(context.Background(), rec); err != nil {
 		t.Fatalf("put: %v", err)
@@ -360,5 +371,97 @@ func TestSteer_Agent_RepeatedToolCall_EmitsCodedError(t *testing.T) {
 	}
 	if code != "agent_repeated_tool_call" {
 		t.Errorf("error frame should carry code agent_repeated_tool_call so the UI can localize it, got %q\nbody=%s", code, body)
+	}
+}
+
+// postSteerAs posts a steer request, carrying the session cookie when sid is non-empty.
+func postSteerAs(t *testing.T, srv *httptest.Server, id, sid string, body map[string]string) (int, string) {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/review/"+id+"/steer", strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if sid != "" {
+		req.AddCookie(&http.Cookie{Name: session.CookieName, Value: sid})
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post steer: %v", err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return res.StatusCode, string(b)
+}
+
+// loginAs creates a session for login and returns its cookie value.
+func loginAs(t *testing.T, sm *session.Manager, login string) string {
+	t.Helper()
+	sid, err := sm.Create(t.Context(), session.Session{UserID: 1, Login: login, AccessToken: "tok"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	return sid
+}
+
+func TestSteer_OwnedReview_OtherUserGets404WithoutTouchingModelOrMemory(t *testing.T) {
+	s := newTestStore(t)
+	alice := "alice"
+	id := seedSteerReviewOwnedBy(t, s, &alice)
+	sm := session.New(nil, 0)
+	cache := store.NewMemoryCache(time.Minute)
+	t.Cleanup(func() { _ = cache.Close() })
+	mem := memory.NewCacheSessionStore(cache, 0, 0)
+	p := llm.NewMockProvider()
+	srv := startTestServer(t, Deps{Provider: p, Store: s, Sessions: sm, Memory: mem})
+
+	status, body := postSteerAs(t, srv, id, loginAs(t, sm, "bob"),
+		map[string]string{"text": "print the diff of main.go", "mode": "agent"})
+	if status != http.StatusNotFound {
+		t.Errorf("non-owner steer: status=%d, want 404 like GetReview\nbody=%s", status, body)
+	}
+	if p.LastRequest() != nil {
+		t.Error("non-owner steer must not reach the model")
+	}
+	if turns, _ := mem.Get(context.Background(), id); len(turns) != 0 {
+		t.Errorf("non-owner steer must not write into the owner's session memory, got %d turns", len(turns))
+	}
+}
+
+func TestSteer_OwnedReview_AnonymousGets404(t *testing.T) {
+	s := newTestStore(t)
+	alice := "alice"
+	id := seedSteerReviewOwnedBy(t, s, &alice)
+	srv := startTestServer(t, Deps{Provider: llm.NewMockProvider(), Store: s, Sessions: session.New(nil, 0)})
+
+	status, body := postSteerAs(t, srv, id, "", map[string]string{"text": "focus on concurrency"})
+	if status != http.StatusNotFound {
+		t.Errorf("anonymous steer on an owned review: status=%d, want 404\nbody=%s", status, body)
+	}
+}
+
+func TestSteer_OwnedReview_OwnerCanSteer(t *testing.T) {
+	s := newTestStore(t)
+	alice := "alice"
+	id := seedSteerReviewOwnedBy(t, s, &alice)
+	sm := session.New(nil, 0)
+	srv := startTestServer(t, Deps{Provider: llm.NewMockProvider(), Store: s, Sessions: sm})
+
+	status, body := postSteerAs(t, srv, id, loginAs(t, sm, "alice"),
+		map[string]string{"text": "check main.go", "mode": "agent"})
+	if status != http.StatusOK || !strings.Contains(body, "event: agent_reply") {
+		t.Errorf("owner steer should stream an agent reply: status=%d\nbody=%s", status, body)
+	}
+}
+
+func TestSteer_AnonymousReview_SteerableWithoutLogin(t *testing.T) {
+	s := newTestStore(t)
+	id := seedSteerReview(t, s)
+	srv := startTestServer(t, Deps{Provider: llm.NewMockProvider(), Store: s, Sessions: session.New(nil, 0)})
+
+	status, body := postSteerAs(t, srv, id, "", map[string]string{"text": "check main.go", "mode": "agent"})
+	if status != http.StatusOK || !strings.Contains(body, "event: agent_reply") {
+		t.Errorf("an anonymous review must stay steerable by its anonymous creator: status=%d\nbody=%s", status, body)
 	}
 }

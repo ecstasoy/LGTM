@@ -212,6 +212,11 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
 			return
 		}
+		// steering hands the cached patches to the model, so it needs the same visibility as GetReview
+		if !canViewReview(c, rec) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
+			return
+		}
 		var p cachedPayload
 		if err := json.Unmarshal(rec.Payload, &p); err != nil {
 			slog.Error("steer payload unmarshal", "err", err, "id", id)
