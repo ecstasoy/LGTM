@@ -18,6 +18,8 @@ const (
 	CodeHistoryLoginRequired = "history_login_required"
 	CodeNotReviewOwner       = "not_review_owner"
 	CodeAgentMaxSteps        = "agent_max_steps"
+	// Agent loop stopped because the model kept repeating an identical tool call.
+	CodeAgentRepeatedToolCall = "agent_repeated_tool_call"
 	// One code per rerunnable stage: byCode dictionary entries are plain strings with no interpolation,
 	// so the stage name has to live in the code rather than in a placeholder.
 	CodeSteerRerunningRisks       = "steer_rerunning_risks"

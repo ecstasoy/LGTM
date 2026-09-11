@@ -304,6 +304,8 @@ export const zh = {
       not_review_owner: "只能删除你创建的评审",
       agent_max_steps:
         "Agent 用尽步数仍未给出答案。可能是工具反复访问本 PR 没改的文件。把问题问得更具体些（含文件名 / 函数名）再试。",
+      agent_repeated_tool_call:
+        "Agent 反复用相同参数调用同一个工具，已提前停止。换个问法，或指明要看的文件 / 函数再试。",
       steer_rerunning_risks: "正在按引导重跑风险阶段…",
       steer_rerunning_suggestions: "正在按引导重跑建议阶段…",
       rate_limited: "请求过于频繁，请稍后再试",

@@ -322,3 +322,43 @@ func TestBuildAgentUserPrompt_NoCrossLocaleLeak(t *testing.T) {
 		t.Errorf("ZH user prompt should keep its Chinese headings:\n%s", zh)
 	}
 }
+
+// loopingToolProvider always asks for the same tool call and never answers.
+type loopingToolProvider struct{}
+
+func (loopingToolProvider) Stream(_ context.Context, _ llm.Request) (<-chan llm.Chunk, error) {
+	ch := make(chan llm.Chunk, 2)
+	ch <- llm.Chunk{ToolCalls: []llm.ToolCall{{ID: "c", Name: "read_file", Arguments: `{"file":"main.go"}`}}}
+	ch <- llm.Chunk{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+func TestSteer_Agent_RepeatedToolCall_EmitsCodedError(t *testing.T) {
+	s := newTestStore(t)
+	id := seedSteerReview(t, s)
+	srv := startTestServer(t, Deps{Provider: loopingToolProvider{}, Store: s})
+
+	res, body := postJSON(t, srv, "/api/review/"+id+"/steer",
+		map[string]string{"text": "check main.go", "mode": "agent"})
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+
+	var code string
+	for _, f := range parseSSE(body) {
+		if f.Type != "error" {
+			continue
+		}
+		var p struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal([]byte(f.Data), &p); err != nil {
+			t.Fatalf("decode error frame: %v (data=%s)", err, f.Data)
+		}
+		code = p.Code
+	}
+	if code != "agent_repeated_tool_call" {
+		t.Errorf("error frame should carry code agent_repeated_tool_call so the UI can localize it, got %q\nbody=%s", code, body)
+	}
+}
