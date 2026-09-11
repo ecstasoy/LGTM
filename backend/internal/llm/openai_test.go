@@ -471,3 +471,52 @@ func TestOpenAIProvider_Stream_CancelDuringBackoffReturnsPromptly(t *testing.T) 
 		t.Errorf("attempts=%d want 1", attempts.Load())
 	}
 }
+
+func TestStreamingClient_TimesOutWaitingForHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	start := time.Now()
+	resp, err := newStreamingClient(50 * time.Millisecond).Get(srv.URL)
+	if err == nil {
+		resp.Body.Close()
+		t.Fatalf("want a timeout while the server withholds response headers; returned after %v", time.Since(start))
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("header timeout should fire near 50ms, took %v", elapsed)
+	}
+}
+
+func TestStreamingClient_StreamMayOutlastHeaderTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		f := w.(http.Flusher)
+		f.Flush()
+		for i := 0; i < 4; i++ {
+			time.Sleep(50 * time.Millisecond)
+			fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"content":"x"}}]}`))
+			f.Flush()
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	resp, err := newStreamingClient(50 * time.Millisecond).Get(srv.URL)
+	if err != nil {
+		t.Fatalf("headers arrive immediately, so no timeout expected: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("a 200ms stream must not be cut off by a 50ms header timeout: %v", err)
+	}
+	if got := strings.Count(string(body), "data: "); got != 4 {
+		t.Errorf("want all 4 events, got %d", got)
+	}
+}

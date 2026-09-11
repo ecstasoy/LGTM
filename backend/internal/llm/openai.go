@@ -21,7 +21,7 @@ type OpenAIProvider struct {
 	APIKey  string
 	Model   string
 
-	HTTPClient *http.Client // 默认 http.DefaultClient
+	HTTPClient *http.Client // nil uses a client that bounds only the wait for response headers
 
 	// wait sleeps between retry attempts; nil means a context-aware timer. Swapped in tests.
 	wait func(ctx context.Context, d time.Duration) error
@@ -43,7 +43,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan Chunk,
 
 	client := p.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultStreamingClient
 	}
 	resp, err := p.connect(ctx, client, body)
 	if err != nil {
@@ -53,6 +53,18 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan Chunk,
 	ch := make(chan Chunk, 16)
 	go streamSSE(ctx, resp.Body, ch)
 	return ch, nil
+}
+
+// responseHeaderTimeout bounds how long a chat completion may take to start streaming.
+const responseHeaderTimeout = 60 * time.Second
+
+var defaultStreamingClient = newStreamingClient(responseHeaderTimeout)
+
+// newStreamingClient times out waiting for response headers but never caps the body; http.Client.Timeout would cut long streams.
+func newStreamingClient(headerTimeout time.Duration) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = headerTimeout
+	return &http.Client{Transport: tr}
 }
 
 const (
