@@ -226,3 +226,22 @@ Code: `middleware.RateLimit`.
 
 **Client IP**
 The address rate limits count against: the header named by `TRUSTED_PLATFORM` (for example `Fly-Client-IP`) when set, otherwise resolved through `TRUSTED_PROXIES`, otherwise the connecting address.
+
+## Overloaded names
+
+Words the codebase uses for more than one concept. In new code, copy and discussion, use the term on the right; rename old uses when touching them.
+
+| Word | Meanings in the codebase today | Use instead |
+|---|---|---|
+| session | login session (`session.Session`); agent memory (`memory.SessionStore`); the review page's "Session" view and `SessionList` | login session · agent memory · session view |
+| cache | review cache (`store.Store.Get` replay); the key-value store `store.Cache`; browser `localStorage` | review cache · `store.Cache` · browser storage |
+| review | LGTM's stored review; one review run; the bot review posted on GitHub | review · review run · bot review |
+| owner | repository owner (`store.Record.Owner`); review owner (`store.Record.UserID`, error `not_review_owner`) | repository owner · review owner |
+| steer, follow-up | "steer" covers both modes; "follow-up" means only the agent run; stage re-run copy says "steer the agent" | stage re-run · agent run |
+| L1, L2, L3 | context layers; model routing tiers in some PR titles and comments | context layers only |
+| patch | a file's diff (`github.File.Patch`); a suggestion's code change (`review.Suggestion.Patch`) | diff · code change |
+| lang, locale | the PR's main programming language (`lang`); the review's language (`locale`); a code change's language (`Patch.lang`) | programming language · locale |
+| id in the `pr` frame | the head SHA, while every other `id` is a review id | head SHA |
+| summary | the summary stage; `ReviewSummary`, a history list row; Chinese UI uses both "摘要" and "总结" for the stage | summary stage · review list item |
+| user id | a GitHub login in `store.Record.UserID`; a numeric GitHub id in `session.Session.UserID` | login · GitHub user id |
+| index, idx | the RAG index; a chunk's position; a suggestion's position; database indexes | RAG index · chunk position · suggestion position |
