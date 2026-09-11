@@ -1,6 +1,6 @@
-// Package agent 是 v2 工具调用 / agent 循环的入口。
-// v1 每个 review stage 只调一次 LLM；v2 可把某个 stage 换成 Agent.Run
-// 实现"LLM -> 选工具 -> 跑工具 -> 回灌结果 -> 再问"的循环。
+// Package agent is the tool-calling agent loop.
+// A review stage calls the LLM once; a stage can instead use Agent.Run
+// to loop: LLM -> pick tool -> run tool -> feed result back -> ask again.
 package agent
 
 import (
@@ -13,44 +13,47 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
-// ErrMaxStepsReached agent loop 达到 MaxSteps 仍未收敛（LLM 一直在调工具）。
-// Result.Output 仍含最后一次 assistant text 供调用方降级展示。
+// ErrMaxStepsReached the loop hit MaxSteps without converging (the LLM kept calling tools).
+// Result.Output still holds the last assistant text for degraded display.
 var ErrMaxStepsReached = errors.New("agent: max steps reached")
+
+// ErrRepeatedToolCall the model repeated an identical tool call after being told it was a repeat.
+var ErrRepeatedToolCall = errors.New("agent: model kept repeating the same tool call")
 
 const defaultMaxSteps = 6
 
-// ToolSpec OpenAI function-calling 风格的工具描述。
-// 直接复用 llm 包的同形状定义：Registry.Specs() 可直传 llm.Request.Tools。
+// ToolSpec OpenAI function-calling tool description.
+// Aliases the llm type so Registry.Specs() can go straight into llm.Request.Tools.
 type ToolSpec = llm.ToolSpec
 
-// Tool 一项可调用能力。
+// Tool one callable capability.
 type Tool interface {
 	Spec() ToolSpec
 	Run(ctx context.Context, args json.RawMessage) (string, error)
 }
 
-// Registry 按名字存放 Tool。
+// Registry tools by name.
 type Registry struct {
 	tools map[string]Tool
 }
 
-// NewRegistry 空注册表。
+// NewRegistry empty registry.
 func NewRegistry() *Registry {
 	return &Registry{tools: make(map[string]Tool)}
 }
 
-// Register 按 Spec().Name 注册;同名覆盖。
+// Register registers by Spec().Name; the same name overwrites.
 func (r *Registry) Register(t Tool) {
 	r.tools[t.Spec().Name] = t
 }
 
-// Lookup 按名查 Tool。
+// Lookup finds a tool by name.
 func (r *Registry) Lookup(name string) (Tool, bool) {
 	t, ok := r.tools[name]
 	return t, ok
 }
 
-// Specs 返回所有 ToolSpec，供 prompt 注入。
+// Specs returns every ToolSpec for the prompt.
 func (r *Registry) Specs() []ToolSpec {
 	specs := make([]ToolSpec, 0, len(r.tools))
 	for _, t := range r.tools {
@@ -59,40 +62,40 @@ func (r *Registry) Specs() []ToolSpec {
 	return specs
 }
 
-// Result Agent 循环结束后的最终输出。
+// Result final output of an agent loop.
 type Result struct {
 	Output string
 	Steps  int
 }
 
-// Agent 一个工具调用循环。
+// Agent one tool-calling loop.
 //
-// 可选 callback 字段（nil 安全）：用于 SSE 推帧 / 日志 / metric / tracing；
-// 不参与状态机决策，调用方只读取事件不能改变 loop 行为。
+// Optional callbacks (nil-safe) for SSE frames / logs / metrics / tracing;
+// they only observe events and never change loop behavior.
 type Agent struct {
 	Provider llm.Provider
 	Tools    *Registry
 	MaxSteps int
 
-	// OnToolCallStart 工具被调用前；用于前端 SSE tool_call_start 帧
+	// OnToolCallStart before a tool runs; drives the frontend tool_call_start SSE frame
 	OnToolCallStart func(ctx context.Context, call llm.ToolCall)
-	// OnToolCallDone 工具执行完后；result 即将作 tool message 回灌 LLM；
-	// 用于前端 SSE tool_call_done 帧。result 中含执行错误字符串（"error: ..."）。
+	// OnToolCallDone after a tool runs; result is about to be fed back as a tool message.
+	// Drives the tool_call_done SSE frame. result includes execution error strings ("error: ...").
 	OnToolCallDone func(ctx context.Context, call llm.ToolCall, result string)
-	// OnText 每收到一段 assistant 文本增量（流式）；用于前端实时显示模型思考
-	// 注意：A2 内部用 lastText 累积；这里同样在 chunk 到达时调用一次
+	// OnText each streamed assistant text delta; lets the frontend show the model thinking live
+	// Called once per chunk as it arrives
 	OnText func(ctx context.Context, delta string)
 }
 
-// Run 跑 ReAct 循环：LLM → 看是否 tool_calls → 跑工具 → 结果回灌作 role=tool 消息 → 再调 LLM。
-// 最多 MaxSteps 轮（默认 6）；用尽返 ErrMaxStepsReached 但 Result.Output 仍含最后 text。
+// Run runs the ReAct loop: LLM -> tool_calls? -> run tools -> feed results back as role=tool -> LLM again.
+// At most MaxSteps rounds (default 6); when exhausted returns ErrMaxStepsReached with the last text in Result.Output.
 //
-// 兼容两种 Request 模式：
-//   - Messages 非空：直接作初始对话（agent 高层接口）
-//   - System / User：组装成 system+user 两条消息（兼容 v1/v2 stage 风格）
+// Two Request modes:
+//   - Messages non-empty: used as the initial conversation
+//   - System / User: assembled into system + user messages (single-shot stage style)
 //
-// 工具执行错误（Run 返 err）不让 loop 挂：错误文字作 tool result 回灌让 LLM 决定如何应对。
-// 未知 tool 同样返错回灌（防 LLM 调到未注册工具时整轮失败）。
+// A tool error (Run returns err) doesn't abort the loop: the error text is fed back so the LLM can react.
+// Unknown tools are fed back the same way, so a hallucinated tool name doesn't fail the whole run.
 func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 	if a.Provider == nil {
 		return Result{}, errors.New("agent: Provider is nil")
@@ -118,6 +121,8 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 	}
 
 	var lastText strings.Builder
+	seen := make(map[string]string) // name+args -> first result
+	warned := make(map[string]bool) // repeats the model has already been told about
 	for step := 0; step < maxSteps; step++ {
 		lastText.Reset()
 		var calls []llm.ToolCall
@@ -150,22 +155,35 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 			}
 		}
 
-		// 没 tool_calls：本轮 assistant 给出最终答案，结束
+		// no tool_calls: this round's assistant text is the final answer
 		if len(calls) == 0 {
 			return Result{Output: lastText.String(), Steps: step + 1}, nil
 		}
 
-		// 把本轮 assistant message（含 tool_calls）+ 每个 tool 的执行结果回灌
+		// feed back this round's assistant message (with tool_calls) plus each tool result
 		msgs = append(msgs, llm.Message{
 			Role:      "assistant",
 			Content:   lastText.String(),
 			ToolCalls: calls,
 		})
 		for _, tc := range calls {
+			key := toolCallKey(tc.Name, tc.Arguments)
+			if warned[key] {
+				return Result{Output: lastText.String(), Steps: step + 1}, ErrRepeatedToolCall
+			}
 			if a.OnToolCallStart != nil {
 				a.OnToolCallStart(ctx, tc)
 			}
-			result := a.runTool(ctx, tc)
+			result, repeated := seen[key]
+			if repeated {
+				warned[key] = true
+				result = fmt.Sprintf("note: you already called %s with these exact arguments; "+
+					"reusing that result instead of running it again. "+
+					"Use different arguments or answer from what you have.\n\n%s", tc.Name, result)
+			} else {
+				result = a.runTool(ctx, tc)
+				seen[key] = result
+			}
 			if a.OnToolCallDone != nil {
 				a.OnToolCallDone(ctx, tc, result)
 			}
@@ -178,11 +196,22 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 		}
 	}
 
-	// MaxSteps 用尽：返最后 text + 显式 error 让调用方降级
+	// MaxSteps exhausted: return the last text plus an explicit error so the caller can degrade
 	return Result{Output: lastText.String(), Steps: maxSteps}, ErrMaxStepsReached
 }
 
-// runTool 单次工具调用；未知 tool / 执行 err 都返字符串供回灌（不抛 err 中断 loop）。
+// toolCallKey identifies a call by name and canonical JSON args, so key order and spacing don't matter.
+func toolCallKey(name, args string) string {
+	var v any
+	if err := json.Unmarshal([]byte(args), &v); err == nil {
+		if canon, err := json.Marshal(v); err == nil {
+			return name + "\x00" + string(canon)
+		}
+	}
+	return name + "\x00" + strings.TrimSpace(args)
+}
+
+// runTool one tool call; unknown tools and execution errors both come back as strings to feed back, never aborting the loop.
 func (a *Agent) runTool(ctx context.Context, tc llm.ToolCall) string {
 	if a.Tools == nil {
 		return fmt.Sprintf("error: no tool registry configured (asked for %q)", tc.Name)

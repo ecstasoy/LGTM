@@ -327,6 +327,10 @@ func PostSteer(d Deps) gin.HandlerFunc {
 							"试着把问题问得更具体（含文件名 / 函数名），或让我（agent）先看「相关代码」段。", result.Steps)
 						frame["code"] = CodeAgentMaxSteps
 					}
+					if errors.Is(err, agent.ErrRepeatedToolCall) {
+						frame["message"] = "Agent stopped early: it kept repeating the same tool call with identical arguments."
+						frame["code"] = CodeAgentRepeatedToolCall
+					}
 					writeSSE(c.Writer, "error", frame)
 				}
 			}

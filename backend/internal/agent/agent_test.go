@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
-// scriptedProvider 按调用次数返预设的 chunks；测试 ReAct 多轮场景用
+// scriptedProvider returns preset chunks per call; for multi-round ReAct tests
 type scriptedProvider struct {
-	steps [][]llm.Chunk // 每次 Stream 调用返一组 chunks
-	calls []llm.Request // 录所有收到的请求供断言
+	steps [][]llm.Chunk // one chunk group per Stream call
+	calls []llm.Request // every request received, for assertions
 }
 
 func (p *scriptedProvider) Stream(_ context.Context, req llm.Request) (<-chan llm.Chunk, error) {
@@ -34,7 +35,7 @@ func (p *scriptedProvider) Stream(_ context.Context, req llm.Request) (<-chan ll
 	return ch, nil
 }
 
-// echoTool 返回 args 原样的可读字符串，方便断言 tool 真被调
+// echoTool echoes args back so tests can assert the tool actually ran
 type echoTool struct{ name string }
 
 func (e *echoTool) Spec() ToolSpec {
@@ -44,7 +45,7 @@ func (e *echoTool) Run(_ context.Context, args json.RawMessage) (string, error) 
 	return "echo:" + string(args), nil
 }
 
-// failingTool 总是返 err，测错误回灌
+// failingTool always errors, for testing error feedback
 type failingTool struct{}
 
 func (f *failingTool) Spec() ToolSpec {
@@ -76,9 +77,9 @@ func TestAgent_Run_OneToolCall_ThenFinalText(t *testing.T) {
 	reg.Register(&echoTool{name: "echo"})
 
 	p := &scriptedProvider{steps: [][]llm.Chunk{
-		// 第 1 步：LLM 调 echo
+		// step 1: LLM calls echo
 		{{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"x":1}`}}}},
-		// 第 2 步：LLM 看到结果返最终答案
+		// step 2: LLM sees the result and answers
 		{{Text: "done after tool"}},
 	}}
 	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
@@ -92,7 +93,7 @@ func TestAgent_Run_OneToolCall_ThenFinalText(t *testing.T) {
 	if res.Output != "done after tool" {
 		t.Errorf("unexpected output: %q", res.Output)
 	}
-	// 第 2 次调用的 Messages 应该含 assistant(tool_calls) + tool(result)
+	// the 2nd call's Messages should include assistant(tool_calls) + tool(result)
 	if len(p.calls) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(p.calls))
 	}
@@ -124,7 +125,7 @@ func TestAgent_Run_UnknownTool_ReturnsErrorString(t *testing.T) {
 	if res.Output != "ok recovered" {
 		t.Errorf("output=%q", res.Output)
 	}
-	// 第二次调用应看到 tool 消息含 "unknown tool"
+	// the 2nd call should see a tool message containing "unknown tool"
 	toolMsg := p.calls[1].Messages[len(p.calls[1].Messages)-1]
 	if !strings.Contains(toolMsg.Content, "unknown tool") {
 		t.Errorf("应回灌 unknown tool err, got %q", toolMsg.Content)
@@ -154,12 +155,14 @@ func TestAgent_Run_MaxStepsReached(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&echoTool{name: "echo"})
 
-	// 让 LLM 每次都调 tool，永远不收敛
-	loopStep := []llm.Chunk{
-		{Text: "thinking..."},
-		{ToolCalls: []llm.ToolCall{{ID: "c", Name: "echo", Arguments: `{}`}}},
+	// distinct args each step: never converges, never trips the repeat guard
+	step := func(n int) []llm.Chunk {
+		return []llm.Chunk{
+			{Text: "thinking..."},
+			{ToolCalls: []llm.ToolCall{{ID: "c", Name: "echo", Arguments: fmt.Sprintf(`{"n":%d}`, n)}}},
+		}
 	}
-	p := &scriptedProvider{steps: [][]llm.Chunk{loopStep, loopStep, loopStep}}
+	p := &scriptedProvider{steps: [][]llm.Chunk{step(1), step(2), step(3)}}
 	a := &Agent{Provider: p, Tools: reg, MaxSteps: 3}
 	res, err := a.Run(context.Background(), llm.Request{User: "loop"})
 	if !errors.Is(err, ErrMaxStepsReached) {
@@ -168,7 +171,7 @@ func TestAgent_Run_MaxStepsReached(t *testing.T) {
 	if res.Steps != 3 {
 		t.Errorf("want Steps=3, got %d", res.Steps)
 	}
-	// 最后一次的 text 应该被带出来
+	// the last text should be carried out
 	if !strings.Contains(res.Output, "thinking") {
 		t.Errorf("max steps 时应返最后 text, got %q", res.Output)
 	}
@@ -187,13 +190,13 @@ func TestAgent_Run_CallbacksFireInOrder(t *testing.T) {
 	reg.Register(&echoTool{name: "echo"})
 
 	p := &scriptedProvider{steps: [][]llm.Chunk{
-		// 第 1 步：流式 text 增量 + tool_call
+		// step 1: streamed text deltas + a tool_call
 		{
 			{Text: "thinking "},
 			{Text: "first..."},
 			{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"x":1}`}}},
 		},
-		// 第 2 步：最终答案
+		// step 2: final answer
 		{{Text: "all done"}},
 	}}
 
@@ -227,7 +230,7 @@ func TestAgent_Run_CallbacksFireInOrder(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	// 文本增量：第 1 步 2 段 + 第 2 步 1 段 = 3 次
+	// text deltas: 2 in step 1 + 1 in step 2 = 3
 	if len(textDeltas) != 3 {
 		t.Errorf("want 3 text deltas, got %d: %v", len(textDeltas), textDeltas)
 	}
@@ -235,7 +238,7 @@ func TestAgent_Run_CallbacksFireInOrder(t *testing.T) {
 		t.Errorf("text delta order off: %v", textDeltas)
 	}
 
-	// tool callbacks：第 1 步 1 次 start + 1 次 done
+	// tool callbacks: one start + one done in step 1
 	if len(starts) != 1 || starts[0].ID != "c1" || starts[0].Name != "echo" {
 		t.Errorf("starts=%+v", starts)
 	}
@@ -252,14 +255,14 @@ func TestAgent_Run_NilCallbacks_Safe(t *testing.T) {
 		{{Text: "done"}},
 	}}
 	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
-	// 三个 callback 都 nil；不应 panic
+	// all three callbacks nil; must not panic
 	if _, err := a.Run(context.Background(), llm.Request{User: "go"}); err != nil {
 		t.Fatalf("nil callbacks should be safe: %v", err)
 	}
 }
 
 func TestAgent_Run_MessagesModeOverridesSystemUser(t *testing.T) {
-	// Messages 非空时优先用；System/User 应被忽略
+	// Messages takes precedence; System/User should be ignored
 	p := &scriptedProvider{steps: [][]llm.Chunk{{{Text: "ok"}}}}
 	a := &Agent{Provider: p, Tools: NewRegistry()}
 	_, _ = a.Run(context.Background(), llm.Request{
@@ -270,5 +273,136 @@ func TestAgent_Run_MessagesModeOverridesSystemUser(t *testing.T) {
 	first := p.calls[0]
 	if len(first.Messages) != 1 || first.Messages[0].Content != "real prompt" {
 		t.Errorf("Messages 模式未生效: %+v", first.Messages)
+	}
+}
+
+// countingTool returns "result#N" where N is its invocation count.
+type countingTool struct {
+	name  string
+	count int
+}
+
+func (c *countingTool) Spec() ToolSpec {
+	return ToolSpec{Name: c.name, Description: "counts calls", Parameters: json.RawMessage(`{}`)}
+}
+func (c *countingTool) Run(_ context.Context, _ json.RawMessage) (string, error) {
+	c.count++
+	return fmt.Sprintf("result#%d", c.count), nil
+}
+
+func TestAgent_Run_RepeatedToolCall_ReusesResultInsteadOfRerunning(t *testing.T) {
+	tool := &countingTool{name: "read_file"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	p := &scriptedProvider{steps: [][]llm.Chunk{
+		{{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read_file", Arguments: `{"file":"a.go"}`}}}},
+		{{ToolCalls: []llm.ToolCall{{ID: "c2", Name: "read_file", Arguments: `{"file":"a.go"}`}}}},
+		{{Text: "final"}},
+	}}
+	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
+	res, err := a.Run(context.Background(), llm.Request{User: "go"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Output != "final" {
+		t.Errorf("output=%q", res.Output)
+	}
+	if tool.count != 1 {
+		t.Errorf("identical call should not re-run the tool; ran %d times", tool.count)
+	}
+	// Every tool_call_id needs a matching tool message or the next API call is rejected.
+	msgs := p.calls[2].Messages
+	last := msgs[len(msgs)-1]
+	if last.Role != "tool" || last.ToolCallID != "c2" {
+		t.Fatalf("want tool message for c2 last, got %+v", last)
+	}
+	if !strings.Contains(last.Content, "result#1") {
+		t.Errorf("repeat should carry the earlier result, got %q", last.Content)
+	}
+	if last.Content == "result#1" {
+		t.Errorf("repeat should tell the model it is a duplicate, got bare result")
+	}
+}
+
+func TestAgent_Run_RepeatedToolCall_MatchesReorderedJSONArgs(t *testing.T) {
+	tool := &countingTool{name: "grep_patches"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	p := &scriptedProvider{steps: [][]llm.Chunk{
+		{{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "grep_patches", Arguments: `{"pattern":"TODO","regex":false}`}}}},
+		{{ToolCalls: []llm.ToolCall{{ID: "c2", Name: "grep_patches", Arguments: `{ "regex": false, "pattern": "TODO" }`}}}},
+		{{Text: "final"}},
+	}}
+	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
+	if _, err := a.Run(context.Background(), llm.Request{User: "go"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if tool.count != 1 {
+		t.Errorf("same JSON with reordered keys and spacing should count as a repeat; ran %d times", tool.count)
+	}
+}
+
+func TestAgent_Run_DifferentArgs_RunEachTime(t *testing.T) {
+	tool := &countingTool{name: "read_file"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	p := &scriptedProvider{steps: [][]llm.Chunk{
+		{{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read_file", Arguments: `{"file":"a.go"}`}}}},
+		{{ToolCalls: []llm.ToolCall{{ID: "c2", Name: "read_file", Arguments: `{"file":"b.go"}`}}}},
+		{{Text: "final"}},
+	}}
+	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
+	if _, err := a.Run(context.Background(), llm.Request{User: "go"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if tool.count != 2 {
+		t.Errorf("different args must run the tool again; ran %d times", tool.count)
+	}
+	last := p.calls[2].Messages[len(p.calls[2].Messages)-1]
+	if last.Content != "result#2" {
+		t.Errorf("non-repeat should get the plain fresh result, got %q", last.Content)
+	}
+}
+
+func TestAgent_Run_PersistentRepeat_StopsEarly(t *testing.T) {
+	tool := &countingTool{name: "read_file"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	loop := []llm.Chunk{
+		{Text: "still looking"},
+		{ToolCalls: []llm.ToolCall{{ID: "c", Name: "read_file", Arguments: `{"file":"a.go"}`}}},
+	}
+	p := &scriptedProvider{steps: [][]llm.Chunk{loop, loop, loop, loop, loop, loop, loop, loop, loop, loop}}
+	var starts, dones int
+	a := &Agent{
+		Provider:        p,
+		Tools:           reg,
+		MaxSteps:        10,
+		OnToolCallStart: func(context.Context, llm.ToolCall) { starts++ },
+		OnToolCallDone:  func(context.Context, llm.ToolCall, string) { dones++ },
+	}
+	res, err := a.Run(context.Background(), llm.Request{User: "go"})
+	if !errors.Is(err, ErrRepeatedToolCall) {
+		t.Fatalf("want ErrRepeatedToolCall, got %v", err)
+	}
+	// model call 1 runs the tool, call 2 gets the repeat note, call 3 repeats anyway -> stop
+	if len(p.calls) != 3 {
+		t.Errorf("want stop after 3 model calls instead of burning all steps, got %d", len(p.calls))
+	}
+	if res.Steps != 3 {
+		t.Errorf("want Steps=3, got %d", res.Steps)
+	}
+	if res.Output != "still looking" {
+		t.Errorf("early stop should keep the last text for degraded display, got %q", res.Output)
+	}
+	if tool.count != 1 {
+		t.Errorf("tool should have run once, ran %d times", tool.count)
+	}
+	if starts != dones {
+		t.Errorf("every tool_call_start needs a done or the UI spinner never stops: starts=%d dones=%d", starts, dones)
 	}
 }

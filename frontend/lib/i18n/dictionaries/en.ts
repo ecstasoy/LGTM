@@ -318,6 +318,8 @@ export const en: Dict = {
       not_review_owner: "You can only delete reviews you created",
       agent_max_steps:
         "The agent ran out of steps without reaching an answer. It may be re-reading files this PR didn't change. Try asking more specifically — name a file or a function.",
+      agent_repeated_tool_call:
+        "The agent kept calling the same tool with the same arguments, so it was stopped early. Try rephrasing, or name the file or function you want it to look at.",
       steer_rerunning_risks: "Rerunning the risks stage with your steer…",
       steer_rerunning_suggestions: "Rerunning the suggestions stage with your steer…",
       rate_limited: "Too many requests — please try again shortly",
