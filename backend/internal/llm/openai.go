@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // OpenAIProvider 调 OpenAI 兼容的 /v1/chat/completions
@@ -19,6 +22,9 @@ type OpenAIProvider struct {
 	Model   string
 
 	HTTPClient *http.Client // 默认 http.DefaultClient
+
+	// wait sleeps between retry attempts; nil means a context-aware timer. Swapped in tests.
+	wait func(ctx context.Context, d time.Duration) error
 }
 
 // NewOpenAIProvider 构造器
@@ -35,31 +41,90 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan Chunk,
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(p.BaseURL, "/")+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
-	httpReq.Header.Set("Accept", "text/event-stream")
-
 	client := p.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
 	}
-	resp, err := client.Do(httpReq)
+	resp, err := p.connect(ctx, client, body)
 	if err != nil {
-		return nil, fmt.Errorf("post chat completions: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("chat completions: status %d: %s", resp.StatusCode, string(b))
+		return nil, err
 	}
 
 	ch := make(chan Chunk, 16)
 	go streamSSE(ctx, resp.Body, ch)
 	return ch, nil
+}
+
+const (
+	maxAttempts   = 3
+	backoffBase   = 500 * time.Millisecond
+	maxRetryAfter = 30 * time.Second
+)
+
+// connect posts the request until it gets a 200, retrying transient statuses; a stream that has started is never retried.
+func (p *OpenAIProvider) connect(ctx context.Context, client *http.Client, body []byte) (*http.Response, error) {
+	endpoint := strings.TrimRight(p.BaseURL, "/") + "/v1/chat/completions"
+	for attempt := 1; ; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
+		httpReq.Header.Set("Accept", "text/event-stream")
+
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("post chat completions: %w", err)
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !retryableStatus(resp.StatusCode) || attempt == maxAttempts {
+			if attempt > 1 {
+				return nil, fmt.Errorf("chat completions: status %d after %d attempts: %s", resp.StatusCode, attempt, string(b))
+			}
+			return nil, fmt.Errorf("chat completions: status %d: %s", resp.StatusCode, string(b))
+		}
+		if err := p.sleep(ctx, retryDelay(attempt, resp.Header.Get("Retry-After"))); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func retryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// retryDelay honors a seconds-form Retry-After (capped), otherwise equal-jitter exponential backoff.
+func retryDelay(attempt int, retryAfter string) time.Duration {
+	if secs, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && secs >= 0 {
+		return min(time.Duration(secs)*time.Second, maxRetryAfter)
+	}
+	half := (backoffBase << (attempt - 1)) / 2
+	return half + time.Duration(rand.Int64N(int64(half)+1))
+}
+
+// sleep waits d or until ctx is done.
+func (p *OpenAIProvider) sleep(ctx context.Context, d time.Duration) error {
+	if p.wait != nil {
+		return p.wait(ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // streamSSE 按行扫描 SSE body，解析 `data: {...}` 推到 ch。

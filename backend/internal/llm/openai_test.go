@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -246,5 +247,152 @@ func TestOpenAIProvider_Stream_MessagesAndToolRoleRoundTrip(t *testing.T) {
 	}
 	if text.String() != "done" {
 		t.Errorf("final text=%q want done", text.String())
+	}
+}
+
+// recordWaits swaps in a wait that records durations instead of sleeping.
+func recordWaits(p *OpenAIProvider) *[]time.Duration {
+	var waits []time.Duration
+	p.wait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+	return &waits
+}
+
+// drainText collects stream text, failing on any chunk error.
+func drainText(t *testing.T, ch <-chan Chunk) string {
+	t.Helper()
+	var b strings.Builder
+	for c := range ch {
+		if c.Err != nil {
+			t.Fatalf("chunk err: %v", c.Err)
+		}
+		b.WriteString(c.Text)
+	}
+	return b.String()
+}
+
+func TestOpenAIProvider_Stream_RetriesTransientStatusThenSucceeds(t *testing.T) {
+	var attempts atomic.Int32
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
+		attempts.Add(1)
+		var req openAIChatRequest
+		if err := json.Unmarshal(body, &req); err != nil || req.Model != "test-model" {
+			t.Errorf("attempt %d: request body must be resent intact, got err=%v body=%q", attempts.Load(), err, body)
+		}
+		if attempts.Load() < 3 {
+			http.Error(w, `{"error":{"message":"overloaded"}}`, http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"content":"ok"}}]}`))
+		fmt.Fprint(w, sseLine("[DONE]"))
+	})
+	waits := recordWaits(p)
+
+	ch, err := p.Stream(context.Background(), Request{User: "hi"})
+	if err != nil {
+		t.Fatalf("Stream should succeed on the 3rd attempt: %v", err)
+	}
+	if got := drainText(t, ch); got != "ok" {
+		t.Errorf("text=%q want ok", got)
+	}
+	if attempts.Load() != 3 {
+		t.Errorf("attempts=%d want 3", attempts.Load())
+	}
+	if len(*waits) != 2 {
+		t.Fatalf("want 2 backoff waits, got %v", *waits)
+	}
+	// equal jitter on a 500ms base: 1st wait in [250ms, 500ms], 2nd in [500ms, 1s]
+	if w := (*waits)[0]; w < 250*time.Millisecond || w > 500*time.Millisecond {
+		t.Errorf("1st wait=%v want within [250ms, 500ms]", w)
+	}
+	if w := (*waits)[1]; w < 500*time.Millisecond || w > time.Second {
+		t.Errorf("2nd wait=%v want within [500ms, 1s]", w)
+	}
+}
+
+func TestOpenAIProvider_Stream_HonorsRetryAfter(t *testing.T) {
+	var attempts atomic.Int32
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
+		attempts.Add(1)
+		if attempts.Load() == 1 {
+			w.Header().Set("Retry-After", "7")
+			http.Error(w, `{"error":{"message":"rate limited"}}`, http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseLine("[DONE]"))
+	})
+	waits := recordWaits(p)
+
+	ch, err := p.Stream(context.Background(), Request{User: "hi"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	drainText(t, ch)
+	if len(*waits) != 1 || (*waits)[0] != 7*time.Second {
+		t.Errorf("want a single 7s wait from Retry-After, got %v", *waits)
+	}
+}
+
+func TestOpenAIProvider_Stream_CapsHugeRetryAfter(t *testing.T) {
+	var attempts atomic.Int32
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
+		attempts.Add(1)
+		if attempts.Load() == 1 {
+			w.Header().Set("Retry-After", "3600")
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseLine("[DONE]"))
+	})
+	waits := recordWaits(p)
+
+	ch, err := p.Stream(context.Background(), Request{User: "hi"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	drainText(t, ch)
+	if len(*waits) != 1 || (*waits)[0] <= 0 || (*waits)[0] > time.Minute {
+		t.Errorf("an hour-long Retry-After must not stall the request; want one wait in (0, 1m], got %v", *waits)
+	}
+}
+
+func TestOpenAIProvider_Stream_GivesUpAfterThreeAttempts(t *testing.T) {
+	var attempts atomic.Int32
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
+		attempts.Add(1)
+		http.Error(w, `{"error":{"message":"down"}}`, http.StatusBadGateway)
+	})
+	recordWaits(p)
+
+	_, err := p.Stream(context.Background(), Request{User: "hi"})
+	if err == nil {
+		t.Fatal("want an error after exhausting retries")
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Errorf("error should carry the last status 502, got %v", err)
+	}
+	if attempts.Load() != 3 {
+		t.Errorf("attempts=%d want 3", attempts.Load())
+	}
+}
+
+func TestOpenAIProvider_Stream_DoesNotRetryClientErrors(t *testing.T) {
+	var attempts atomic.Int32
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
+		attempts.Add(1)
+		http.Error(w, `{"error":{"message":"key invalid"}}`, http.StatusUnauthorized)
+	})
+	waits := recordWaits(p)
+
+	if _, err := p.Stream(context.Background(), Request{User: "hi"}); err == nil {
+		t.Fatal("want error")
+	}
+	if attempts.Load() != 1 || len(*waits) != 0 {
+		t.Errorf("a 401 won't fix itself; want 1 attempt and no waits, got attempts=%d waits=%v", attempts.Load(), *waits)
 	}
 }
