@@ -118,6 +118,7 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 	}
 
 	var lastText strings.Builder
+	seen := make(map[string]string) // name+args -> first result
 	for step := 0; step < maxSteps; step++ {
 		lastText.Reset()
 		var calls []llm.ToolCall
@@ -165,7 +166,16 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 			if a.OnToolCallStart != nil {
 				a.OnToolCallStart(ctx, tc)
 			}
-			result := a.runTool(ctx, tc)
+			key := toolCallKey(tc.Name, tc.Arguments)
+			result, repeated := seen[key]
+			if repeated {
+				result = fmt.Sprintf("note: you already called %s with these exact arguments; "+
+					"reusing that result instead of running it again. "+
+					"Use different arguments or answer from what you have.\n\n%s", tc.Name, result)
+			} else {
+				result = a.runTool(ctx, tc)
+				seen[key] = result
+			}
 			if a.OnToolCallDone != nil {
 				a.OnToolCallDone(ctx, tc, result)
 			}
@@ -180,6 +190,17 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 
 	// MaxSteps 用尽：返最后 text + 显式 error 让调用方降级
 	return Result{Output: lastText.String(), Steps: maxSteps}, ErrMaxStepsReached
+}
+
+// toolCallKey identifies a call by name and canonical JSON args, so key order and spacing don't matter.
+func toolCallKey(name, args string) string {
+	var v any
+	if err := json.Unmarshal([]byte(args), &v); err == nil {
+		if canon, err := json.Marshal(v); err == nil {
+			return name + "\x00" + string(canon)
+		}
+	}
+	return name + "\x00" + strings.TrimSpace(args)
 }
 
 // runTool 单次工具调用；未知 tool / 执行 err 都返字符串供回灌（不抛 err 中断 loop）。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -270,5 +271,96 @@ func TestAgent_Run_MessagesModeOverridesSystemUser(t *testing.T) {
 	first := p.calls[0]
 	if len(first.Messages) != 1 || first.Messages[0].Content != "real prompt" {
 		t.Errorf("Messages 模式未生效: %+v", first.Messages)
+	}
+}
+
+// countingTool returns "result#N" where N is its invocation count.
+type countingTool struct {
+	name  string
+	count int
+}
+
+func (c *countingTool) Spec() ToolSpec {
+	return ToolSpec{Name: c.name, Description: "counts calls", Parameters: json.RawMessage(`{}`)}
+}
+func (c *countingTool) Run(_ context.Context, _ json.RawMessage) (string, error) {
+	c.count++
+	return fmt.Sprintf("result#%d", c.count), nil
+}
+
+func TestAgent_Run_RepeatedToolCall_ReusesResultInsteadOfRerunning(t *testing.T) {
+	tool := &countingTool{name: "read_file"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	p := &scriptedProvider{steps: [][]llm.Chunk{
+		{{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read_file", Arguments: `{"file":"a.go"}`}}}},
+		{{ToolCalls: []llm.ToolCall{{ID: "c2", Name: "read_file", Arguments: `{"file":"a.go"}`}}}},
+		{{Text: "final"}},
+	}}
+	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
+	res, err := a.Run(context.Background(), llm.Request{User: "go"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Output != "final" {
+		t.Errorf("output=%q", res.Output)
+	}
+	if tool.count != 1 {
+		t.Errorf("identical call should not re-run the tool; ran %d times", tool.count)
+	}
+	// Every tool_call_id needs a matching tool message or the next API call is rejected.
+	msgs := p.calls[2].Messages
+	last := msgs[len(msgs)-1]
+	if last.Role != "tool" || last.ToolCallID != "c2" {
+		t.Fatalf("want tool message for c2 last, got %+v", last)
+	}
+	if !strings.Contains(last.Content, "result#1") {
+		t.Errorf("repeat should carry the earlier result, got %q", last.Content)
+	}
+	if last.Content == "result#1" {
+		t.Errorf("repeat should tell the model it is a duplicate, got bare result")
+	}
+}
+
+func TestAgent_Run_RepeatedToolCall_MatchesReorderedJSONArgs(t *testing.T) {
+	tool := &countingTool{name: "grep_patches"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	p := &scriptedProvider{steps: [][]llm.Chunk{
+		{{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "grep_patches", Arguments: `{"pattern":"TODO","regex":false}`}}}},
+		{{ToolCalls: []llm.ToolCall{{ID: "c2", Name: "grep_patches", Arguments: `{ "regex": false, "pattern": "TODO" }`}}}},
+		{{Text: "final"}},
+	}}
+	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
+	if _, err := a.Run(context.Background(), llm.Request{User: "go"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if tool.count != 1 {
+		t.Errorf("same JSON with reordered keys and spacing should count as a repeat; ran %d times", tool.count)
+	}
+}
+
+func TestAgent_Run_DifferentArgs_RunEachTime(t *testing.T) {
+	tool := &countingTool{name: "read_file"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	p := &scriptedProvider{steps: [][]llm.Chunk{
+		{{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read_file", Arguments: `{"file":"a.go"}`}}}},
+		{{ToolCalls: []llm.ToolCall{{ID: "c2", Name: "read_file", Arguments: `{"file":"b.go"}`}}}},
+		{{Text: "final"}},
+	}}
+	a := &Agent{Provider: p, Tools: reg, MaxSteps: 5}
+	if _, err := a.Run(context.Background(), llm.Request{User: "go"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if tool.count != 2 {
+		t.Errorf("different args must run the tool again; ran %d times", tool.count)
+	}
+	last := p.calls[2].Messages[len(p.calls[2].Messages)-1]
+	if last.Content != "result#2" {
+		t.Errorf("non-repeat should get the plain fresh result, got %q", last.Content)
 	}
 }
