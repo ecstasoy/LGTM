@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// stubOpenAIServer 起一个 httptest 模拟 chat completions endpoint。
-// handler 收到请求后可读 body 做断言，把要返的 SSE 文本写回。
+// stubOpenAIServer starts an httptest server mimicking the chat completions endpoint.
+// The handler can assert on the request body and writes back the SSE text to return.
 func stubOpenAIServer(t *testing.T, handler func(t *testing.T, w http.ResponseWriter, body []byte)) *OpenAIProvider {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +32,7 @@ func stubOpenAIServer(t *testing.T, handler func(t *testing.T, w http.ResponseWr
 	return NewOpenAIProvider(srv.URL, "test-key", "test-model")
 }
 
-// sseLine 拼一行 SSE。
+// sseLine formats one SSE line.
 func sseLine(payload string) string { return "data: " + payload + "\n\n" }
 
 func TestOpenAIProvider_Stream_Success(t *testing.T) {
@@ -52,7 +52,7 @@ func TestOpenAIProvider_Stream_Success(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
-		// 三段 delta + DONE
+		// three deltas + DONE
 		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"content":"Hello"}}]}`))
 		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"content":" world"}}]}`))
 		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"content":"!"}}]}`))
@@ -118,11 +118,11 @@ func TestOpenAIProvider_Stream_JSONSchemaMode(t *testing.T) {
 		t.Fatalf("Stream: %v", err)
 	}
 	for range ch {
-	} // 排空，让 goroutine 收尾
+	} // drain so the goroutine finishes
 }
 
 func TestOpenAIProvider_Stream_ContextCancel(t *testing.T) {
-	// 服务端慢慢推，给 client 取消的机会
+	// the server pushes slowly, giving the client a chance to cancel
 	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -142,16 +142,16 @@ func TestOpenAIProvider_Stream_ContextCancel(t *testing.T) {
 		t.Fatalf("Stream: %v", err)
 	}
 
-	<-ch // 收到第一帧后取消
+	<-ch // cancel after the first frame
 	cancel()
 
-	// 期望 goroutine 在 ctx 取消后退出，channel 最终 close
+	// the goroutine should exit after ctx cancel and eventually close the channel
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
 		case _, ok := <-ch:
 			if !ok {
-				return // 正常 close
+				return // closed normally
 			}
 		case <-deadline:
 			t.Fatal("ctx 取消后 channel 未在 2s 内关闭")
@@ -159,7 +159,7 @@ func TestOpenAIProvider_Stream_ContextCancel(t *testing.T) {
 	}
 }
 
-// stream tool_calls 跨多帧分片，验证按 index 累积并 emit Chunk{ToolCalls}
+// tool_calls split across stream frames: verify accumulation by index and a single Chunk{ToolCalls}
 func TestOpenAIProvider_Stream_ToolCalls_AccumulatedAcrossDeltas(t *testing.T) {
 	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
 		var req openAIChatRequest
@@ -168,7 +168,7 @@ func TestOpenAIProvider_Stream_ToolCalls_AccumulatedAcrossDeltas(t *testing.T) {
 			t.Errorf("expected tools[0].function.name=read_file, got %+v", req.Tools)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		// 模拟 OpenAI 跨帧分片：第 1 帧建立 id/name + 部分 args，第 2 帧补 args 余下，第 3 帧 finish_reason
+		// fragmenting: frame 1 has id/name + partial args, frame 2 the rest of the args, frame 3 finish_reason
 		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"read_file","arguments":"{\"file\":"}}]}}]}`))
 		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"main.go\"}"}}]}}]}`))
 		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`))
@@ -210,14 +210,14 @@ func TestOpenAIProvider_Stream_ToolCalls_AccumulatedAcrossDeltas(t *testing.T) {
 	}
 }
 
-// Messages 多轮 + tool 角色回灌
+// multi-turn Messages + tool role feedback
 func TestOpenAIProvider_Stream_MessagesAndToolRoleRoundTrip(t *testing.T) {
 	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
 		var req openAIChatRequest
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		// 3 条消息：user / assistant(tool_calls) / tool(result)
+		// 3 messages: user / assistant(tool_calls) / tool(result)
 		if len(req.Messages) != 3 {
 			t.Fatalf("want 3 messages, got %d", len(req.Messages))
 		}
