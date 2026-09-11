@@ -75,7 +75,16 @@ func (p *OpenAIProvider) connect(ctx context.Context, client *http.Client, body 
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
-			return nil, fmt.Errorf("post chat completions: %w", err)
+			if ctx.Err() != nil || attempt == maxAttempts {
+				if attempt > 1 {
+					return nil, fmt.Errorf("post chat completions after %d attempts: %w", attempt, err)
+				}
+				return nil, fmt.Errorf("post chat completions: %w", err)
+			}
+			if err := p.sleep(ctx, retryDelay(attempt, "")); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		if resp.StatusCode == http.StatusOK {
 			return resp, nil

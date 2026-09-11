@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -394,5 +395,79 @@ func TestOpenAIProvider_Stream_DoesNotRetryClientErrors(t *testing.T) {
 	}
 	if attempts.Load() != 1 || len(*waits) != 0 {
 		t.Errorf("a 401 won't fix itself; want 1 attempt and no waits, got attempts=%d waits=%v", attempts.Load(), *waits)
+	}
+}
+
+// failFirstTransport fails the first n round trips with a connection error, then delegates.
+type failFirstTransport struct {
+	n     int
+	calls int
+}
+
+func (f *failFirstTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.calls++
+	if f.calls <= f.n {
+		return nil, errors.New("connection reset by peer")
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestOpenAIProvider_Stream_RetriesConnectionErrors(t *testing.T) {
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseLine(`{"choices":[{"delta":{"content":"ok"}}]}`))
+		fmt.Fprint(w, sseLine("[DONE]"))
+	})
+	tr := &failFirstTransport{n: 1}
+	p.HTTPClient = &http.Client{Transport: tr}
+	waits := recordWaits(p)
+
+	ch, err := p.Stream(context.Background(), Request{User: "hi"})
+	if err != nil {
+		t.Fatalf("a single dropped connection should be retried: %v", err)
+	}
+	if got := drainText(t, ch); got != "ok" {
+		t.Errorf("text=%q want ok", got)
+	}
+	if tr.calls != 2 || len(*waits) != 1 {
+		t.Errorf("want 2 round trips and 1 wait, got calls=%d waits=%v", tr.calls, *waits)
+	}
+}
+
+func TestOpenAIProvider_Stream_DoesNotRetryAfterContextCanceled(t *testing.T) {
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {})
+	waits := recordWaits(p)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := p.Stream(ctx, Request{User: "hi"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if len(*waits) != 0 {
+		t.Errorf("a caller that gave up must not be retried; got waits=%v", *waits)
+	}
+}
+
+func TestOpenAIProvider_Stream_CancelDuringBackoffReturnsPromptly(t *testing.T) {
+	var attempts atomic.Int32
+	p := stubOpenAIServer(t, func(t *testing.T, w http.ResponseWriter, body []byte) {
+		attempts.Add(1)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "overloaded", http.StatusServiceUnavailable)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := p.Stream(ctx, Request{User: "hi"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want context.DeadlineExceeded, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("backoff must end when the caller gives up; took %v", elapsed)
+	}
+	if attempts.Load() != 1 {
+		t.Errorf("attempts=%d want 1", attempts.Load())
 	}
 }
