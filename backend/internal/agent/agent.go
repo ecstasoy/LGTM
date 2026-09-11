@@ -17,6 +17,9 @@ import (
 // Result.Output 仍含最后一次 assistant text 供调用方降级展示。
 var ErrMaxStepsReached = errors.New("agent: max steps reached")
 
+// ErrRepeatedToolCall the model repeated an identical tool call after being told it was a repeat.
+var ErrRepeatedToolCall = errors.New("agent: model kept repeating the same tool call")
+
 const defaultMaxSteps = 6
 
 // ToolSpec OpenAI function-calling 风格的工具描述。
@@ -119,6 +122,7 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 
 	var lastText strings.Builder
 	seen := make(map[string]string) // name+args -> first result
+	warned := make(map[string]bool) // repeats the model has already been told about
 	for step := 0; step < maxSteps; step++ {
 		lastText.Reset()
 		var calls []llm.ToolCall
@@ -163,12 +167,16 @@ func (a *Agent) Run(ctx context.Context, req llm.Request) (Result, error) {
 			ToolCalls: calls,
 		})
 		for _, tc := range calls {
+			key := toolCallKey(tc.Name, tc.Arguments)
+			if warned[key] {
+				return Result{Output: lastText.String(), Steps: step + 1}, ErrRepeatedToolCall
+			}
 			if a.OnToolCallStart != nil {
 				a.OnToolCallStart(ctx, tc)
 			}
-			key := toolCallKey(tc.Name, tc.Arguments)
 			result, repeated := seen[key]
 			if repeated {
+				warned[key] = true
 				result = fmt.Sprintf("note: you already called %s with these exact arguments; "+
 					"reusing that result instead of running it again. "+
 					"Use different arguments or answer from what you have.\n\n%s", tc.Name, result)

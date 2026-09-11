@@ -155,12 +155,14 @@ func TestAgent_Run_MaxStepsReached(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&echoTool{name: "echo"})
 
-	// 让 LLM 每次都调 tool，永远不收敛
-	loopStep := []llm.Chunk{
-		{Text: "thinking..."},
-		{ToolCalls: []llm.ToolCall{{ID: "c", Name: "echo", Arguments: `{}`}}},
+	// distinct args each step: never converges, never trips the repeat guard
+	step := func(n int) []llm.Chunk {
+		return []llm.Chunk{
+			{Text: "thinking..."},
+			{ToolCalls: []llm.ToolCall{{ID: "c", Name: "echo", Arguments: fmt.Sprintf(`{"n":%d}`, n)}}},
+		}
 	}
-	p := &scriptedProvider{steps: [][]llm.Chunk{loopStep, loopStep, loopStep}}
+	p := &scriptedProvider{steps: [][]llm.Chunk{step(1), step(2), step(3)}}
 	a := &Agent{Provider: p, Tools: reg, MaxSteps: 3}
 	res, err := a.Run(context.Background(), llm.Request{User: "loop"})
 	if !errors.Is(err, ErrMaxStepsReached) {
@@ -362,5 +364,45 @@ func TestAgent_Run_DifferentArgs_RunEachTime(t *testing.T) {
 	last := p.calls[2].Messages[len(p.calls[2].Messages)-1]
 	if last.Content != "result#2" {
 		t.Errorf("non-repeat should get the plain fresh result, got %q", last.Content)
+	}
+}
+
+func TestAgent_Run_PersistentRepeat_StopsEarly(t *testing.T) {
+	tool := &countingTool{name: "read_file"}
+	reg := NewRegistry()
+	reg.Register(tool)
+
+	loop := []llm.Chunk{
+		{Text: "still looking"},
+		{ToolCalls: []llm.ToolCall{{ID: "c", Name: "read_file", Arguments: `{"file":"a.go"}`}}},
+	}
+	p := &scriptedProvider{steps: [][]llm.Chunk{loop, loop, loop, loop, loop, loop, loop, loop, loop, loop}}
+	var starts, dones int
+	a := &Agent{
+		Provider:        p,
+		Tools:           reg,
+		MaxSteps:        10,
+		OnToolCallStart: func(context.Context, llm.ToolCall) { starts++ },
+		OnToolCallDone:  func(context.Context, llm.ToolCall, string) { dones++ },
+	}
+	res, err := a.Run(context.Background(), llm.Request{User: "go"})
+	if !errors.Is(err, ErrRepeatedToolCall) {
+		t.Fatalf("want ErrRepeatedToolCall, got %v", err)
+	}
+	// model call 1 runs the tool, call 2 gets the repeat note, call 3 repeats anyway -> stop
+	if len(p.calls) != 3 {
+		t.Errorf("want stop after 3 model calls instead of burning all steps, got %d", len(p.calls))
+	}
+	if res.Steps != 3 {
+		t.Errorf("want Steps=3, got %d", res.Steps)
+	}
+	if res.Output != "still looking" {
+		t.Errorf("early stop should keep the last text for degraded display, got %q", res.Output)
+	}
+	if tool.count != 1 {
+		t.Errorf("tool should have run once, ran %d times", tool.count)
+	}
+	if starts != dones {
+		t.Errorf("every tool_call_start needs a done or the UI spinner never stops: starts=%d dones=%d", starts, dones)
 	}
 }
