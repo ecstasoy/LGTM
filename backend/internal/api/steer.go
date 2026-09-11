@@ -212,12 +212,10 @@ func PostSteer(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
 			return
 		}
-		// owned reviews are owner-only, same as GetReview; 404 so the review's existence isn't revealed
-		if rec.UserID != nil {
-			if sess := CurrentSession(c); sess == nil || sess.Login != *rec.UserID {
-				c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
-				return
-			}
+		// steering hands the cached patches to the model, so it needs the same visibility as GetReview
+		if !canViewReview(c, rec) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
+			return
 		}
 		var p cachedPayload
 		if err := json.Unmarshal(rec.Payload, &p); err != nil {
