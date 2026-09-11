@@ -134,3 +134,95 @@ Both kinds share one key space, so one can overwrite the other.
 **Reference**
 A chunk returned by retrieval, with its similarity score. The L4 layer keeps references scoring at least 0.35 whose files are not already in L2, up to four.
 Code: `index.Reference`.
+
+## Steering and the agent
+
+**Steer**
+A follow-up instruction on a stored review, run without fetching GitHub again. It is either a stage re-run or an agent run. Nothing steer produces is written back to the review.
+Code: `api.PostSteer` (`POST /api/review/:id/steer`, field `mode`).
+UI: "User steering" / "用户引导".
+Avoid: "steer the agent" for a stage re-run; only an agent run involves the agent.
+
+**Stage re-run**
+The steer mode that runs the risks or suggestions stage again, with the user's text added to the PR context and used as the retrieval query. The page replaces its list with the result; a reload brings back the stored list.
+UI: "Re-review risks" / "重评风险", "Regenerate suggestions" / "重出建议".
+
+**Agent run**
+The steer mode that answers the user with the agent. The follow-up panel always uses it.
+UI: "Follow-up" / "追问", "Agent deep dive" / "Agent 深挖".
+
+**Agent**
+A loop that calls the model, runs the tools the model asks for, feeds the results back, and repeats until the model answers or runs out of steps. A step is one model call; steer allows 8. Repeating an identical tool call (same tool, same arguments) reuses the earlier result once with a warning, and a second repeat stops the run.
+Code: `backend/internal/agent/agent.go`.
+
+**Tool / tool call**
+A capability the agent may use, and one use of it. Tools are confined to the pull request's changed files (`read_file`, `list_dir`, `grep_patches`), plus `search_repo` for retrieval within the repository's scope when retrieval is enabled. Each call streams as `tool_call_start` and `tool_call_done`.
+Code: `backend/internal/agent/builtin.go`.
+UI: "Call {name}" / "调用 {name}".
+
+**Agent memory**
+Earlier agent runs on the same review, given to the next agent run as context: the user's text and the agent's reply for the last 10 turns, kept for 7 days. Tool calls and results are not kept. Agent memory belongs to the review, not to a user.
+Code: `memory.SessionStore`, `memory.CacheSessionStore`.
+Avoid: "session" or "session memory"; a session is a login session.
+
+## Acting on GitHub
+
+**Login session**
+A signed-in GitHub user's server-side state: GitHub id, login, profile and GitHub token. The token never reaches the browser. Identified by an HTTP-only cookie and kept for 30 days.
+Code: `session.Session`, `session.Manager`.
+UI: "Sign in with GitHub" / "GitHub 登录".
+Avoid: "session" for agent memory or for the review page's "Session" view.
+
+**GitHub App**
+LGTM's app on GitHub. It signs users in, receives webhook events, and posts bot reviews.
+Code: `oauth.Client`.
+UI: "Install the LGTM App" / "装 LGTM App".
+
+**Installation / installation token**
+The GitHub App installed on an account or organisation, and the one-hour token that lets LGTM act as the bot there.
+
+**Webhook review**
+A review run started by GitHub: a pull request opened, synchronized or reopened, or a slash command. It runs in the background and is owned by the pull request's author.
+Code: `api.WebhookGitHub`, `api.runWebhookReview`.
+
+**Slash command**
+A pull request comment line starting with `/lgtm`. `/lgtm` or `/lgtm review` starts a webhook review; `/lgtm help`, or anything unrecognised, gets usage help. The bot acknowledges each command with a comment.
+
+**Bot review**
+The pull request review LGTM posts on GitHub after a webhook review: the summary as its body and suggestions as inline suggestion comments. Always a comment, never an approval.
+Code: `backend/internal/oauth/review_full.go`.
+Avoid: "review" alone, which means LGTM's stored review.
+
+**Adopt**
+Taking a suggestion onto the pull request as the signed-in user, in one of two ways:
+- **Comment**: post the suggestion as a review comment on its file and line. Needs triage permission or higher on the base repository. Undo deletes the comment.
+- **Commit**: post the comment, then apply it as a commit on the pull request's branch. Needs write permission, and GitHub may still refuse, for example on a fork that disallows maintainer edits.
+
+Code: `api.PostAdoptComment`, `api.PostAdoptCommit`, `api.DeleteAdoptComment`, `backend/internal/oauth/apply.go`.
+UI: "Comment on PR" / "评论到 PR", "Commit directly" / "直接提交", "Undo" / "撤回".
+
+**Adoption count**
+How many of a review's suggestions were adopted. Tracked only in the browser.
+UI: "n/total adopted" / "采纳 n/total".
+
+**Repo permission**
+What the signed-in user may do on the base repository, reported as `can_comment` and `can_commit`, with a reason code when not allowed.
+Code: `GET /api/perms`, `backend/internal/oauth/perms.go`.
+
+**Notification**
+An in-app message that a webhook review finished, sent to whoever triggered it and to the pull request's author. The newest 50 per user are kept for 7 days and shown as a toast, but only if they arrive while the page is open.
+Code: `api.PushNotification`, `frontend/lib/notifications.ts`.
+UI: "PR reviewed automatically" / "PR 已自动评审".
+
+## Platform
+
+**Error code**
+A stable, machine-readable `code` on API errors and on stream `error` and `info` frames. The frontend maps known codes to wording in each language.
+Code: `backend/internal/api/errcode.go`, `friendlyError` in `frontend/lib/errors.ts`.
+
+**Rate limit**
+Requests counted per client IP in fixed windows: 5 per 25 seconds on expensive endpoints (review, steer, adopt) and 20 per 4 seconds on reads. Over the limit a request gets 429 with `Retry-After` and the code `rate_limited`. If counting fails, requests go through.
+Code: `middleware.RateLimit`.
+
+**Client IP**
+The address rate limits count against: the header named by `TRUSTED_PLATFORM` (for example `Fly-Client-IP`) when set, otherwise resolved through `TRUSTED_PROXIES`, otherwise the connecting address.
