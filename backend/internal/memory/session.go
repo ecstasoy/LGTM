@@ -117,3 +117,13 @@ func (s *CacheSessionStore) Reset(ctx context.Context, reviewID string) error {
 	}
 	return nil
 }
+
+// Count 返回该 review 的已记忆 turn 数；nil receiver / 空 ID / 不存在 都返 0, nil。
+// 给前端展示「已记忆 N 轮对话」chip 用，比 Get 后取 len 更直观。
+func (s *CacheSessionStore) Count(ctx context.Context, reviewID string) (int, error) {
+	turns, err := s.Get(ctx, reviewID)
+	if err != nil {
+		return 0, err
+	}
+	return len(turns), nil
+}
