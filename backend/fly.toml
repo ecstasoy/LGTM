@@ -5,6 +5,11 @@
 app = "lgtm-backend"
 primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg / sin / sjc 等
 
+# On a stop signal (Fly sends SIGINT; SIGTERM is handled the same) the server drains for SHUTDOWN_TIMEOUT
+# before exiting, so this must stay above it. The volume pins us to one machine, so a deploy is down for
+# as long as the drain runs: 120s covers a typical review without stalling a deploy for the 300s maximum.
+kill_timeout = "120s"
+
 [build]
   dockerfile = "Dockerfile"
   # 注意：实际部署上下文是 repo root（见 .github/workflows/deploy.yml）
@@ -14,9 +19,10 @@ primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg /
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"     # 闲置自动停（免费档省时长）
+  auto_stop_machines = "stop"     # idle machines beyond min_machines_running stop
   auto_start_machines = true      # 请求来了自动起
-  min_machines_running = 0        # 完全无流量时省钱；要持续在线改 1
+  # Webhook reviews run after their 202 with no open connection, so an idle-stopped machine kills them mid-review.
+  min_machines_running = 1
   processes = ["app"]
 
   # liveness：进程还活着；30s 一次
@@ -58,6 +64,8 @@ primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg /
   # a fixed one, so read Fly's own header instead. Fly overwrites it on every inbound
   # request, so it cannot be forged from outside.
   TRUSTED_PLATFORM = "Fly-Client-IP"
+  # Leaves 10s of kill_timeout for the process to exit after the drain gives up.
+  SHUTDOWN_TIMEOUT = "110s"
 
   # RAG：rag.db 也落 volume 避免重启丢索引
   # RAG_SCOPE 非空 → 容器 entrypoint 自动后台跑 indexrepo 扫 /app/src 全仓预索引
