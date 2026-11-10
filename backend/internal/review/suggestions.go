@@ -41,7 +41,7 @@ var suggestionsSystemByLocale = map[i18n.Locale]string{
 	i18n.EN: "You are a code reviewer. Emit strict JSON exactly as specified, nothing else. Write every string field in English.",
 }
 
-// SuggestionsStage 渲染 suggestions.<locale>.tmpl，强制 JSON 输出，解析后 emit 一次 suggestions_done。
+// SuggestionsStage renders suggestions.<locale>.tmpl, parses the strict JSON, anchors it to the L2 diffs and emits one suggestions_done.
 type SuggestionsStage struct {
 	Model       string
 	Temperature float32
@@ -107,10 +107,11 @@ func (s SuggestionsStage) Run(ctx context.Context, c prctx.Context, p llm.Provid
 			return
 		}
 
+		anchored := AnchorSuggestions(*parsed.Suggestions, c.L2Files)
 		select {
 		case <-ctx.Done():
 			return
-		case events <- buildEvent("suggestions_done", *parsed.Suggestions):
+		case events <- buildEvent("suggestions_done", anchored):
 		}
 		emit(events, "done", map[string]string{"stage": "suggestions"})
 	}()
