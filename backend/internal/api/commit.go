@@ -108,7 +108,7 @@ func PostAdoptCommit(d Deps) gin.HandlerFunc {
 		// 1) post the review comment first (same body as the comment endpoint)
 		body := buildSuggestionCommentBody(sg)
 		cm, err := d.OAuthClient.PostPRComment(ctx, s.AccessToken, rec.Owner, rec.Repo, rec.PRNumber,
-			body, rec.HeadSHA, sg.File, sg.Line)
+			body, rec.HeadSHA, sg.File, sg.StartLine, sg.Line)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "post comment failed: " + err.Error()})
 			return

@@ -21,8 +21,9 @@ type Comment struct {
 	Line    int    `json:"line"`
 }
 
-// PostPRComment 发一条 PR review comment（行内 ```suggestion 块由 caller 拼好放 body 里）
-// 必须传 commitID（head SHA）+ path + line，否则 GitHub 拒发；side="RIGHT"（after-diff，新代码侧）
+// PostPRComment posts one PR review comment; the caller builds any ```suggestion block into body.
+// commitID (head SHA), path and line are required; side is RIGHT (new code).
+// startLine > 0 makes it a multi-line comment over startLine..line, which a multi-line suggestion block replaces.
 //
 // 文档 https://docs.github.com/rest/pulls/comments#create-a-review-comment-for-a-pull-request
 // 权限 pull_requests:write
@@ -31,7 +32,7 @@ func (c *Client) PostPRComment(
 	accessToken, owner, repo string,
 	prNumber int,
 	body, commitID, path string,
-	line int,
+	startLine, line int,
 ) (*Comment, error) {
 	payload := map[string]any{
 		"body":      body,
@@ -39,6 +40,10 @@ func (c *Client) PostPRComment(
 		"path":      path,
 		"line":      line,
 		"side":      "RIGHT",
+	}
+	if startLine > 0 && startLine < line {
+		payload["start_line"] = startLine
+		payload["start_side"] = "RIGHT"
 	}
 	raw, _ := json.Marshal(payload)
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/comments", owner, repo, prNumber)
