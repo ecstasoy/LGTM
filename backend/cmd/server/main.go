@@ -130,7 +130,7 @@ func main() {
 	slog.Info("stop signal received; draining in-flight work", "timeout", cfg.ShutdownTimeout.String())
 	drainCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	if err := api.Drain(drainCtx, srv); err != nil {
+	if err := api.Drain(drainCtx, srv, deps.Background); err != nil {
 		slog.Error("drain timed out; remaining work was cut off", "err", err)
 		return
 	}
@@ -156,6 +156,7 @@ func buildDeps(cfg config.Config) api.Deps {
 		},
 		// DefaultLocale: normalized once at startup so only "zh"/"en" ever reach the request-boundary resolver.
 		DefaultLocale: i18n.Normalize(cfg.DefaultLocale, i18n.ZH),
+		Background:    &api.Background{},
 	}
 	if cfg.SummaryModel != "" || cfg.RisksModel != "" || cfg.SuggestionsModel != "" {
 		slog.Info("per-stage model routing",
