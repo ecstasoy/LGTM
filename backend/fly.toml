@@ -1,9 +1,9 @@
-# LGTM 后端 Fly.io 配置
-# 用法：在 backend/ 目录执行 `flyctl launch --no-deploy --copy-config`
-# 然后设 secrets（见 docs/DEPLOY.md）后 `flyctl deploy`
+# LGTM backend Fly.io config
+# Usage: run `flyctl launch --no-deploy --copy-config` in backend/
+# then set secrets (see docs/DEPLOY.md) and run `flyctl deploy`
 
 app = "lgtm-backend"
-primary_region = "nrt"  # Tokyo；距 GitHub + 国内用户都近。可改 hkg / sin / sjc 等
+primary_region = "nrt"  # Tokyo: close to GitHub and to users in China; hkg / sin / sjc etc. also work
 
 # On a stop signal (Fly sends SIGINT; SIGTERM is handled the same) the server drains for SHUTDOWN_TIMEOUT
 # before exiting, so this must stay above it. The volume pins us to one machine, so a deploy is down for
@@ -12,20 +12,20 @@ kill_timeout = "120s"
 
 [build]
   dockerfile = "Dockerfile"
-  # 注意：实际部署上下文是 repo root（见 .github/workflows/deploy.yml）
-  # 本地手动 `flyctl deploy` 时需 `cd` 到 repo root 并加 --config / --dockerfile 标志
+  # Note: the real deploy context is the repo root (see .github/workflows/deploy.yml)
+  # a manual local `flyctl deploy` has to `cd` to the repo root and pass --config / --dockerfile
 
-# 公网入口：HTTPS 自动 + force_https，容器内监听 8080
+# Public entry: automatic HTTPS + force_https; the container listens on 8080
 [http_service]
   internal_port = 8080
   force_https = true
   auto_stop_machines = "stop"     # idle machines beyond min_machines_running stop
-  auto_start_machines = true      # 请求来了自动起
+  auto_start_machines = true      # start on incoming requests
   # Webhook reviews run after their 202 with no open connection, so an idle-stopped machine kills them mid-review.
   min_machines_running = 1
   processes = ["app"]
 
-  # liveness：进程还活着；30s 一次
+  # liveness: the process is alive; every 30s
   [[http_service.checks]]
     grace_period = "10s"
     interval = "30s"
@@ -33,7 +33,7 @@ kill_timeout = "120s"
     timeout = "3s"
     path = "/api/health/live"
 
-  # readiness：依赖可用；10s 一次，失败 LB 摘流不重启
+  # readiness: dependencies are usable; every 10s; a failure pulls it from the LB without a restart
   [[http_service.checks]]
     grace_period = "10s"
     interval = "10s"
@@ -42,12 +42,12 @@ kill_timeout = "120s"
     path = "/api/health/ready"
 
 # Volume: holds rag.db, plus reviews.db when no POSTGRES_URL secret is set (survives restart / redeploy)
-# 创建：`flyctl volumes create data --size 1 --region nrt`
+# Create with: `flyctl volumes create data --size 1 --region nrt`
 [mounts]
   source = "data"
   destination = "/data"
 
-# 默认 env（非敏感；secrets 走 `flyctl secrets set ...`）
+# Default env (non-secret; secrets go through `flyctl secrets set ...`)
 # The live app also has POSTGRES_URL and REDIS_URL set as secrets, which take priority over SQLITE_PATH
 # and the in-memory cache. This file alone does not tell you what production runs — check the secrets.
 [env]
@@ -67,13 +67,13 @@ kill_timeout = "120s"
   # Leaves 10s of kill_timeout for the process to exit after the drain gives up.
   SHUTDOWN_TIMEOUT = "110s"
 
-  # RAG：rag.db 也落 volume 避免重启丢索引
-  # RAG_SCOPE 非空 → 容器 entrypoint 自动后台跑 indexrepo 扫 /app/src 全仓预索引
-  # 真召回还需 EMBEDDING_API_KEY secret；缺则降级 mock（向量随机=等于关 RAG）
+  # RAG: rag.db lives on the volume too so the index survives restarts
+  # RAG_SCOPE non-empty → the container entrypoint pre-indexes the whole repo under /app/src in the background
+  # real recall also needs the EMBEDDING_API_KEY secret; without it this degrades to mock (random vectors, i.e. RAG off)
   RAG_DB_PATH = "/data/rag.db"
   RAG_SCOPE = "ecstasoy/LGTM"
 
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 512  # 给 LLM 调用 + 未来 sqlite-vss 留余量；免费档够
+  memory_mb = 512  # headroom for LLM calls and a future sqlite-vss
