@@ -9,13 +9,14 @@ import (
 	"net/http"
 )
 
-// ReviewCommentInline 一条提交评审时附带的 inline 评论
-// 在文件 path 第 Line 行（diff RIGHT 侧）发 Body
+// ReviewCommentInline is one inline comment submitted with a review, on line Line (or StartLine..Line) of Path.
 type ReviewCommentInline struct {
-	Path string `json:"path"`
-	Line int    `json:"line"`
-	Side string `json:"side"` // 默认 "RIGHT"
-	Body string `json:"body"`
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line,omitempty"` // 0 means a single-line comment on Line.
+	StartSide string `json:"start_side,omitempty"` // Defaults to RIGHT when StartLine is set.
+	Line      int    `json:"line"`
+	Side      string `json:"side"` // Defaults to RIGHT.
+	Body      string `json:"body"`
 }
 
 // PostPRReview 一次性提交完整 PR review（带 summary body + N 条 inline 评论）
@@ -32,10 +33,14 @@ func (c *Client) PostPRReview(
 	commitID, body string,
 	inline []ReviewCommentInline,
 ) (*PRReview, error) {
-	// 给空 side 字段补默认 RIGHT
 	for i := range inline {
 		if inline[i].Side == "" {
 			inline[i].Side = "RIGHT"
+		}
+		if inline[i].StartLine <= 0 || inline[i].StartLine >= inline[i].Line {
+			inline[i].StartLine, inline[i].StartSide = 0, ""
+		} else if inline[i].StartSide == "" {
+			inline[i].StartSide = "RIGHT"
 		}
 	}
 	payload := map[string]any{

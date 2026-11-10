@@ -27,7 +27,9 @@ export interface File {
 
 export interface Suggestion {
   file: string;
-  line: number;
+  line: number; // Last line of the anchored range, on the new side of the diff.
+  start_line?: number; // First line of a multi-line range; omitted when the suggestion covers `line` alone.
+  outside_diff?: boolean; // `line` is not a changed line, so it cannot be posted as an inline comment.
   type: "bug" | "style" | "perf" | "security" | "concurrency";
   title: string;
   body: string;

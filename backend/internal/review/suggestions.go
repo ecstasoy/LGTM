@@ -23,12 +23,14 @@ type Patch struct {
 // 扩展自 prototype/ 的 data.js shape：title + body 区分摘要与细节；
 // patch 可选 —— LLM 给不出具体代码改写时省略，UI 仅展示 title + body。
 type Suggestion struct {
-	File  string `json:"file"`
-	Line  int    `json:"line"`
-	Type  string `json:"type"` // bug | style | perf | security | concurrency
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Patch *Patch `json:"patch,omitempty"`
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+	StartLine   int    `json:"start_line,omitempty"`   // First line of a multi-line range ending at Line; 0 means Line alone.
+	OutsideDiff bool   `json:"outside_diff,omitempty"` // Line is not a new-side diff line, so GitHub cannot attach it inline.
+	Type        string `json:"type"`                   // bug | style | perf | security | concurrency
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	Patch       *Patch `json:"patch,omitempty"`
 }
 
 // suggestionsSystemByLocale carries the persona and the output-format instruction; the stage template carries the task.
@@ -39,7 +41,7 @@ var suggestionsSystemByLocale = map[i18n.Locale]string{
 	i18n.EN: "You are a code reviewer. Emit strict JSON exactly as specified, nothing else. Write every string field in English.",
 }
 
-// SuggestionsStage 渲染 suggestions.<locale>.tmpl，强制 JSON 输出，解析后 emit 一次 suggestions_done。
+// SuggestionsStage renders suggestions.<locale>.tmpl, parses the strict JSON, anchors it to the L2 diffs and emits one suggestions_done.
 type SuggestionsStage struct {
 	Model       string
 	Temperature float32
@@ -105,10 +107,11 @@ func (s SuggestionsStage) Run(ctx context.Context, c prctx.Context, p llm.Provid
 			return
 		}
 
+		anchored := AnchorSuggestions(*parsed.Suggestions, c.L2Files)
 		select {
 		case <-ctx.Done():
 			return
-		case events <- buildEvent("suggestions_done", *parsed.Suggestions):
+		case events <- buildEvent("suggestions_done", anchored):
 		}
 		emit(events, "done", map[string]string{"stage": "suggestions"})
 	}()

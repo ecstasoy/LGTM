@@ -459,12 +459,12 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 }
 
 // postBotReview posts the full review as the App bot, using the installation token
-// The summary goes in the body along with an lgtm.com link; each suggestion becomes an inline comment (with a ```suggestion block)
+// The summary goes in the body along with an lgtm.com link; each anchored suggestion becomes an inline comment (with a ```suggestion block)
 //
 // The whole flow:
 // 1. sign the AppJWT
 // 2. exchange it for an installation token
-// 3. parse the suggestions JSON → skip any missing file/line (fork filename mapping issue)
+// 3. parse the suggestions JSON → anchored ones go inline, the rest are listed in the body
 // 4. PostPRReview sends the complete review in one call
 func postBotReview(
 	ctx context.Context,
@@ -494,22 +494,31 @@ func postBotReview(
 		}
 	}
 
-	inline := make([]oauth.ReviewCommentInline, 0, len(suggestions))
-	for _, s := range suggestions {
-		if s.File == "" || s.Line <= 0 {
+	inline, outside := splitBotReviewComments(suggestions)
+	body := buildBotReviewBody(summary, reviewID, len(inline), outside, triggerAction)
+	_, err = c.PostPRReview(ctx, tok.Token, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, body, inline)
+	return err
+}
+
+// splitBotReviewComments turns anchored suggestions into inline comments and returns the ones GitHub cannot attach.
+// A single unattachable inline comment makes GitHub reject the whole review with 422, so those go in the body.
+func splitBotReviewComments(sgs []review.Suggestion) ([]oauth.ReviewCommentInline, []review.Suggestion) {
+	inline := make([]oauth.ReviewCommentInline, 0, len(sgs))
+	var outside []review.Suggestion
+	for _, s := range sgs {
+		if s.File == "" || s.Line <= 0 || s.OutsideDiff {
+			outside = append(outside, s)
 			continue
 		}
 		inline = append(inline, oauth.ReviewCommentInline{
-			Path: s.File,
-			Line: s.Line,
-			Side: "RIGHT",
-			Body: buildSuggestionCommentBody(s),
+			Path:      s.File,
+			StartLine: s.StartLine,
+			Line:      s.Line,
+			Side:      "RIGHT",
+			Body:      buildSuggestionCommentBody(s),
 		})
 	}
-
-	body := buildBotReviewBody(summary, reviewID, len(suggestions), triggerAction)
-	_, err = c.PostPRReview(ctx, tok.Token, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, body, inline)
-	return err
+	return inline, outside
 }
 
 // buildBotReviewBody assembles the summary + review stats + a link out to lgtm.com
@@ -517,7 +526,7 @@ func postBotReview(
 //
 // Everything this function returns is posted straight to GitHub, so it is hardcoded English regardless of
 // DEFAULT_LOCALE — see the package-level note in comment.go for the rule this follows.
-func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) string {
+func buildBotReviewBody(summary, reviewID string, inlineCount int, outside []review.Suggestion, trigger string) string {
 	var sb strings.Builder
 	switch trigger {
 	case "synchronize":
@@ -533,19 +542,44 @@ func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) s
 		sb.WriteString(summary)
 		sb.WriteString("\n\n")
 	}
-	switch sgCount {
+	switch inlineCount {
 	case 0:
-		sb.WriteString("✨ No inline suggestions this time — nothing stood out at the line level.\n\n")
+		if len(outside) == 0 {
+			sb.WriteString("✨ No inline suggestions this time — nothing stood out at the line level.\n\n")
+		}
 	case 1:
 		sb.WriteString("✨ Generated **1** suggestion, attached as an inline comment. Use GitHub's built-in \"Apply suggestion\" to commit it with a click.\n\n")
 	default:
-		fmt.Fprintf(&sb, "✨ Generated **%d** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n", sgCount)
+		fmt.Fprintf(&sb, "✨ Generated **%d** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n", inlineCount)
+	}
+	if len(outside) > 0 {
+		sb.WriteString("**Notes outside the diff** — GitHub only attaches inline comments to changed lines, so these are listed here:\n\n")
+		for _, s := range outside {
+			sb.WriteString("- ")
+			if ref := suggestionRef(s); ref != "" {
+				fmt.Fprintf(&sb, "`%s` ", ref)
+			}
+			fmt.Fprintf(&sb, "**%s** (%s) — %s\n", s.Title, s.Type, strings.Join(strings.Fields(s.Body), " "))
+		}
+		sb.WriteString("\n")
 	}
 	if reviewID != "" {
 		fmt.Fprintf(&sb, "🔗 Full review (risk list + RAG-retrieved context): https://lgtm-alpha.vercel.app/review/%s\n", reviewID)
 	}
 	sb.WriteString("\n<sub>Posted automatically by LGTM. Pushing a new commit triggers a re-review; comment `/lgtm review` to trigger one manually; `/lgtm help` for more commands</sub>")
 	return sb.String()
+}
+
+// suggestionRef renders file:line, or just the file when there is no line.
+func suggestionRef(s review.Suggestion) string {
+	switch {
+	case s.File == "":
+		return ""
+	case s.Line <= 0:
+		return s.File
+	default:
+		return fmt.Sprintf("%s:%d", s.File, s.Line)
+	}
 }
 
 // verifyHMAC checks GitHub's "sha256=<hex>" signature format with a timing-safe comparison
