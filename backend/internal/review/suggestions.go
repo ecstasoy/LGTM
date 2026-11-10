@@ -23,12 +23,14 @@ type Patch struct {
 // 扩展自 prototype/ 的 data.js shape：title + body 区分摘要与细节；
 // patch 可选 —— LLM 给不出具体代码改写时省略，UI 仅展示 title + body。
 type Suggestion struct {
-	File  string `json:"file"`
-	Line  int    `json:"line"`
-	Type  string `json:"type"` // bug | style | perf | security | concurrency
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Patch *Patch `json:"patch,omitempty"`
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+	StartLine   int    `json:"start_line,omitempty"`   // First line of a multi-line range ending at Line; 0 means Line alone.
+	OutsideDiff bool   `json:"outside_diff,omitempty"` // Line is not a new-side diff line, so GitHub cannot attach it inline.
+	Type        string `json:"type"`                   // bug | style | perf | security | concurrency
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	Patch       *Patch `json:"patch,omitempty"`
 }
 
 // suggestionsSystemByLocale carries the persona and the output-format instruction; the stage template carries the task.
