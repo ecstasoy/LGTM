@@ -47,6 +47,8 @@ type Deps struct {
 	// normalized (i18n.Normalize(cfg.DefaultLocale, i18n.ZH)); the zero value is treated as i18n.ZH by callers,
 	// so leaving it unset in older callers and unit tests is safe.
 	DefaultLocale i18n.Locale
+	// Background tracks webhook work that runs after its 202, so shutdown can wait for it; nil runs it untracked.
+	Background *Background
 }
 
 // RegisterWithSecret is Register but takes the webhook secret explicitly
