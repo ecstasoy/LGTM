@@ -2,12 +2,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
@@ -107,11 +111,30 @@ func main() {
 	api.RegisterWithSecret(r, deps, cfg.GithubAppWebhookSec)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
+	srv := &http.Server{Addr: addr, Handler: r}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	serveErr := make(chan error, 1)
 	slog.Info("server starting", "addr", addr)
-	if err := r.Run(addr); err != nil {
+	go func() { serveErr <- srv.ListenAndServe() }()
+	select {
+	case err := <-serveErr:
 		slog.Error("server exited", "err", err)
 		os.Exit(1)
+	case <-ctx.Done():
 	}
+	// Restore default signal handling so a second signal kills the process outright.
+	stop()
+
+	slog.Info("stop signal received; draining in-flight work", "timeout", cfg.ShutdownTimeout.String())
+	drainCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
+	if err := api.Drain(drainCtx, srv); err != nil {
+		slog.Error("drain timed out; remaining work was cut off", "err", err)
+		return
+	}
+	slog.Info("server drained")
 }
 
 // buildDeps 按配置选 Provider；明示用户意图与最终走向，缺 key 显式 warn 而非静默降级。

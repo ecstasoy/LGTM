@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -69,6 +70,10 @@ type Config struct {
 	// today". Leave empty anywhere the header is not injected by the platform itself:
 	// a client can forge it otherwise.
 	TrustedPlatform string `env:"TRUSTED_PLATFORM" envDefault:""`
+
+	// ShutdownTimeout bounds how long a stop signal waits for in-flight work before cutting it off.
+	// Keep it below the platform's own kill timeout (Fly kill_timeout), or the platform kills the process first.
+	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
 
 	// DefaultLocale is the single fallback for review output language: the last tier of the API's
 	// body > Accept-Language > default chain, and the value used by the webhook path, which has no user request.
