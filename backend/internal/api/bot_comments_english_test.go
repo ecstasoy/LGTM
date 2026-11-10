@@ -31,7 +31,7 @@ func containsCJK(s string) bool {
 // and may legitimately be non-English.
 func TestBuildBotReviewBody_NoCJK(t *testing.T) {
 	for _, trig := range []string{"opened", "synchronize", "reopened", "slash_review", ""} {
-		got := buildBotReviewBody("English summary text.", "rev123", 2, trig)
+		got := buildBotReviewBody("English summary text.", "rev123", 2, nil, trig)
 		if containsCJK(got) {
 			t.Errorf("trigger=%q: buildBotReviewBody output contains CJK:\n%s", trig, got)
 		}
@@ -57,7 +57,7 @@ func TestBuildBotReviewBody_SuggestionCountWording(t *testing.T) {
 		{2, "✨ Generated **2** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n"},
 	}
 	for _, c := range cases {
-		got := buildBotReviewBody("summary", "rev123", c.count, "opened")
+		got := buildBotReviewBody("summary", "rev123", c.count, nil, "opened")
 		if !strings.Contains(got, c.want) {
 			t.Errorf("count=%d: expected body to contain %q, got:\n%s", c.count, c.want, got)
 		}
