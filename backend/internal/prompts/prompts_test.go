@@ -99,6 +99,21 @@ func TestSuggestionsTemplate_HasGuardrails(t *testing.T) {
 	}
 }
 
+// The server anchors patches by finding patch.before in the diff, so both locales must ask for verbatim new-side lines.
+func TestSuggestionsTemplate_AsksForVerbatimBefore(t *testing.T) {
+	for name, want := range map[string][]string{
+		"suggestions.zh.tmpl": {"逐字复制整行", "会被丢弃"},
+		"suggestions.en.tmpl": {"whole lines verbatim", "is discarded"},
+	} {
+		out := render(t, name, minimalCtx())
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s is missing the anchoring rule %q", name, w)
+			}
+		}
+	}
+}
+
 // 新增评审维度：破坏性变更类别 + 测试缺口 + PR 描述对齐。
 func TestRisksTemplate_CoversNewDimensions(t *testing.T) {
 	out := render(t, "risks.zh.tmpl", minimalCtx())

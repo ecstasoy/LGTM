@@ -65,7 +65,9 @@ Field constraints:
 
 Principles:
 - Every suggestion should paste straight into a GitHub PR review comment
-- `patch.before` / `patch.after` are **code snippets**, not whole files
+- `line` is a line number in the new file and must fall on the new side of the diff (a context or `+` line)
+- `patch.before` copies **whole lines verbatim** from the new side of the diff (without the leading `+` / space marker), only the lines to replace; `patch.after` is their complete replacement, not a whole file
+- The server locates `patch.before` in the diff to compute the line range: a patch whose `before` is not found is discarded and only the text is kept
 - Concentrate on how to change it; skip long rationales
 
 Do not suggest (this avoids noise and dangerous rewrites):

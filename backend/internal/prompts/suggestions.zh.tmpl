@@ -65,7 +65,9 @@
 
 原则：
 - 每条建议要能直接照搬到 GitHub PR review comment
-- `patch.before` / `patch.after` 是**代码片段**，不是整个文件
+- `line` 是新文件里的行号，必须落在 diff 的新代码侧（上下文行或 `+` 行）
+- `patch.before` 从 diff 新代码侧**逐字复制整行**（去掉行首的 `+` / 空格标记），只包含要替换的那几行；`patch.after` 是这几行的完整替换，不是整个文件
+- 服务端用 `patch.before` 在 diff 里定位行范围：找不到的 patch 会被丢弃，只保留文字建议
 - 聚焦"怎么改"，不要长篇 rationale
 
 不要建议（避免噪音 / 危险改写）：
