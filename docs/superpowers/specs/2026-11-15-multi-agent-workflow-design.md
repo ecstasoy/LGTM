@@ -74,7 +74,7 @@
   - 不做叠加 PR；
   - heredoc 里反引号不转义。
 - 配置 Orca 仓库的 setup 脚本，在每个新 worktree 创建时：
-  - 把 `AGENTS.md` 和上述 4 个 `docs/` 本地文件**符号链接**进 worktree；用符号链接，是为了所有 worktree 读到同一份最新内容；
+  - 把 6 个本地文件**符号链接**进 worktree：`AGENTS.md`、下面提到的 `CLAUDE.md` 垫片，以及上述 4 个 `docs/` 文件；用符号链接，是为了所有 worktree 读到同一份最新内容；
   - 运行 `cd frontend && pnpm install --frozen-lockfile`；
   - 运行 `cd backend && go mod download`。
 - 这些符号链接必须被 git 忽略，防止误提交。做法：把对应路径加进 `.git/info/exclude`，这个文件在所有 worktree 间共享，且不入库。

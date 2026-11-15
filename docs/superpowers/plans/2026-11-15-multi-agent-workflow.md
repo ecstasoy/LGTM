@@ -175,11 +175,11 @@
   Orca 的 CLI 没有设置钩子的命令，需要人自己操作：Orca 设置 → 本仓库 → Hooks → Setup script，填入一行：
   `sh "$ORCA_ROOT_PATH/.claude/orca-setup.sh"`
   同一页面把 agent 启动策略改成"等 setup 完成后再启动"（`setupAgentStartupPolicy: wait-for-setup`）。否则 agent 可能在 `AGENTS.md` 链接进来之前就已经启动，或者和 setup 里的 `pnpm install` 同时运行。
-  然后运行 `orca repo show --repo id:9833289c-9950-4a60-8ee8-66f62a650d6e --json`，确认 `hookSettings.scripts.setup` 已是这一行，且 `setupAgentStartupPolicy` 为 `wait-for-setup`。
+  然后运行 `orca repo show --repo id:<repo-id> --json`（`<repo-id>` 从 `orca repo list --json` 里查），确认 `hookSettings.scripts.setup` 已是这一行，且 `setupAgentStartupPolicy` 为 `wait-for-setup`。
 
 - [ ] **Step 5: 用一个临时 worktree 做端到端验证**
 
-  运行：`orca worktree create --repo id:9833289c-9950-4a60-8ee8-66f62a650d6e --name setup-check --no-parent --setup run --json`。setup 跑完后，在新 worktree 里运行：
+  运行：`orca worktree create --repo id:<repo-id> --name setup-check --no-parent --setup run --json`。setup 跑完后，在新 worktree 里运行：
   `ls -l AGENTS.md CLAUDE.md docs/agent-*.md docs/self-hosting-readiness.md docs/competitor-signals.md && git add -A -n | grep -cE 'AGENTS|CLAUDE|agent-|self-hosting|competitor' ; test -d frontend/node_modules && echo deps-ok`
   期望：6 个都是指向主 checkout 的软链接；`grep -c` 输出 `0`；打印 `deps-ok`。
   再手动跑一次：`ORCA_ROOT_PATH=<主 checkout> ORCA_WORKTREE_PATH="$PWD" sh <主 checkout>/.claude/orca-setup.sh`，期望 6 个文件全部打印"跳过"。
