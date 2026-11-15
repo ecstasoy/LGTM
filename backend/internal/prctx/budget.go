@@ -8,6 +8,7 @@ type BudgetReport struct {
 	UsedL3     int
 	UsedL4     int
 	Dropped    []string // 被丢弃全文的文件路径
+	Excluded   []string // lockfiles and generated files, skipped regardless of budget
 }
 
 // 默认比例 L1:L2:L3 = 4:5:1；超限压缩顺序 L3 → L2 → L1。

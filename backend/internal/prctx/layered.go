@@ -136,7 +136,7 @@ func (b *LayeredBuilder) BuildWith(ctx context.Context, pr github.PullRequest, o
 	}
 
 	// L2 按 patch 大小逐个塞入；超出预算的文件入 Dropped 列表
-	l2Files, l2Used, dropped := allocateL2(pr.Files, l2Avail)
+	l2Files, l2Used, dropped, excluded := allocateL2(pr.Files, l2Avail)
 	return Context{
 		L1Meta:        l1Str,
 		L2Files:       l2Files,
@@ -149,6 +149,7 @@ func (b *LayeredBuilder) BuildWith(ctx context.Context, pr github.PullRequest, o
 			UsedL3:     l3Tokens,
 			UsedL4:     l4Tokens,
 			Dropped:    dropped,
+			Excluded:   excluded,
 		},
 	}, nil
 }
@@ -277,11 +278,16 @@ func buildL3Conventions(c github.Conventions) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func allocateL2(files []github.File, budget int) ([]FileContext, int, []string) {
+func allocateL2(files []github.File, budget int) ([]FileContext, int, []string, []string) {
 	out := make([]FileContext, 0, len(files))
 	dropped := []string{}
+	var excluded []string
 	used := 0
 	for _, f := range files {
+		if isExcluded(f) {
+			excluded = append(excluded, f.Path)
+			continue
+		}
 		patchTokens := estimateTokens(f.Patch)
 		if used+patchTokens > budget {
 			dropped = append(dropped, f.Path)
@@ -293,7 +299,7 @@ func allocateL2(files []github.File, budget int) ([]FileContext, int, []string) 
 		})
 		used += patchTokens
 	}
-	return out, used, dropped
+	return out, used, dropped, excluded
 }
 
 // estimateTokens 粗略估 token 数（不引 tiktoken 等真实分词器，按字符数 / 3 近似）。
