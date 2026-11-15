@@ -120,3 +120,82 @@ func TestSlashReview_CommitInProgress_SaysSo(t *testing.T) {
 		t.Errorf("no model calls expected")
 	}
 }
+
+func TestPRRuns_NewerCommitCancelsOlder(t *testing.T) {
+	runs := newPRRuns()
+	ctxA, doneA := runs.start(context.Background(), "o/r#7", "aaa")
+	ctxB, doneB := runs.start(context.Background(), "o/r#7", "bbb")
+
+	if !errors.Is(context.Cause(ctxA), errSuperseded) {
+		t.Fatalf("older run should be cancelled as superseded, cause=%v", context.Cause(ctxA))
+	}
+	if ctxB.Err() != nil {
+		t.Fatal("newer run must keep going")
+	}
+	doneA() // the old run finishing late must not deregister the new one
+	ctxC, doneC := runs.start(context.Background(), "o/r#7", "ccc")
+	if !errors.Is(context.Cause(ctxB), errSuperseded) {
+		t.Fatal("B should still have been tracked, and now superseded by C")
+	}
+	doneB()
+	doneC()
+	if ctxC.Err() == nil {
+		t.Fatal("done should release the run's context")
+	}
+	ctxD, doneD := runs.start(context.Background(), "o/r#8", "ddd")
+	defer doneD()
+	if _, doneE := runs.start(context.Background(), "o/r#9", "eee"); ctxD.Err() != nil {
+		t.Fatal("another PR's run must not cancel this one")
+	} else {
+		doneE()
+	}
+}
+
+// blockingProvider holds every stream open until its context ends.
+type blockingProvider struct{ started chan struct{} }
+
+func (p *blockingProvider) Stream(ctx context.Context, _ llm.Request) (<-chan llm.Chunk, error) {
+	select {
+	case p.started <- struct{}{}:
+	default:
+	}
+	ch := make(chan llm.Chunk, 1)
+	go func() {
+		<-ctx.Done()
+		ch <- llm.Chunk{Err: ctx.Err()}
+		close(ch)
+	}()
+	return ch, nil
+}
+
+func TestWebhookReview_NewerPushCancelsOlderRun(t *testing.T) {
+	api := &fakeGitHubAPI{}
+	block := &blockingProvider{started: make(chan struct{}, 1)}
+	dOld, s := slashDeps(t, api, block)
+	dOld.Fetcher = fakeFetcher{pr: gh.PullRequest{Owner: "o", Repo: "r", Number: 70, HeadSHA: "old0000",
+		Files: []gh.File{{Path: "a.go", Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b"}}}}
+	args := webhookReviewArgs{PrURL: "u", Owner: "o", Repo: "r", Number: 70, InstallationID: 99, TriggerAction: "synchronize"}
+
+	finished := make(chan struct{})
+	go func() { runWebhookReview(dOld, args); close(finished) }()
+	select {
+	case <-block.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("old run never reached the model")
+	}
+
+	dNew := dOld
+	dNew.Fetcher = fakeFetcher{pr: gh.PullRequest{Owner: "o", Repo: "r", Number: 70, HeadSHA: "new1111",
+		Files: []gh.File{{Path: "a.go", Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+c"}}}}
+	dNew.Provider = llm.NewMockProvider()
+	runWebhookReview(dNew, args)
+
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("old run was not cancelled by the newer push")
+	}
+	if rec, _ := s.Get(context.Background(), "o", "r", 70, "old0000", "en"); rec != nil {
+		t.Error("a superseded run must not persist a review")
+	}
+}

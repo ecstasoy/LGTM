@@ -448,6 +448,9 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	}
 	defer release()
 
+	ctx, done := activeRuns.start(ctx, fmt.Sprintf("%s/%s#%d", pr.Owner, pr.Repo, pr.Number), pr.HeadSHA)
+	defer done()
+
 	// idempotency check: an existing review for the same (owner, repo, pr, head_sha, locale) → skip
 	{
 		if rec := cachedReview(ctx, d, pr); rec != nil {
@@ -504,6 +507,10 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		case "error":
 			errSeen = true
 		}
+	}
+	if errors.Is(context.Cause(ctx), errSuperseded) {
+		slog.Info("webhook: review superseded by a newer push; dropped", "pr", pr.Number, "head", shortSHA(pr.HeadSHA))
+		return
 	}
 	if errSeen || risksData == nil || suggestionsData == nil {
 		slog.Warn("webhook: review missing stage data; skip persist + bot review")
