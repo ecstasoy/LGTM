@@ -1,5 +1,4 @@
-# CI：每个 PR / push to main 跑后端 go test + vet、前端 tsc + build
-# 评委直接看绿勾；本地破坏性改动落地前在 PR 上有兜底
+# Runs backend vet + tests, frontend type-check + tests + build, and the deploy-decision script tests on every PR and push to main
 name: CI
 
 on:
@@ -7,6 +6,14 @@ on:
     branches: [main]
   push:
     branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Superseded PR runs are cancelled; an in-progress run on main never is (a pending one may be replaced, and the next deploy diffs against what is live)
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -63,3 +70,12 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  deploy-decision:
+    name: Deploy decision script tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run deploy-decision tests
+        run: bash .github/scripts/deploy-decision_test.sh
