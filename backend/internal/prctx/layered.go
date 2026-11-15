@@ -137,20 +137,21 @@ func (b *LayeredBuilder) BuildWith(ctx context.Context, pr github.PullRequest, o
 	}
 
 	// L2 按 patch 大小逐个塞入；超出预算的文件入 Dropped 列表
-	l2Files, l2Used, dropped, excluded := allocateL2(pr.Files, l2Avail)
+	l2 := allocateL2(pr.Files, l2Avail)
 	return Context{
 		L1Meta:        l1Str,
-		L2Files:       l2Files,
+		L2Files:       l2.files,
 		L3Conventions: l3Str,
 		L4References:  l4Refs,
 		BudgetReport: BudgetReport{
 			TokenLimit: b.TokenLimit,
 			UsedL1:     l1Tokens,
-			UsedL2:     l2Used,
+			UsedL2:     l2.used,
 			UsedL3:     l3Tokens,
 			UsedL4:     l4Tokens,
-			Dropped:    dropped,
-			Excluded:   excluded,
+			Dropped:    l2.dropped,
+			Excluded:   l2.excluded,
+			Clipped:    l2.clipped,
 		},
 	}, nil
 }
@@ -279,17 +280,31 @@ func buildL3Conventions(c github.Conventions) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// allocateL2 fills the budget by fileRank, biggest change first within a rank, then emits in PR order.
-func allocateL2(files []github.File, budget int) ([]FileContext, int, []string, []string) {
-	dropped := []string{}
-	var excluded []string
+// minClipTokens is the smallest leftover worth spending on a partial diff.
+const minClipTokens = 200
+
+type l2Result struct {
+	files    []FileContext
+	used     int
+	dropped  []string
+	excluded []string
+	clipped  []string
+}
+
+// allocateL2 fills the budget by fileRank, biggest change first within a rank, clips what overflows into the
+// leftover, then emits in PR order. Removed files stay out: L1 already lists them and they hold no new code.
+func allocateL2(files []github.File, budget int) l2Result {
+	r := l2Result{dropped: []string{}}
+	patches := make(map[int]string, len(files))
 	var order []int
 	for i, f := range files {
-		if isExcluded(f) {
-			excluded = append(excluded, f.Path)
-			continue
+		switch {
+		case isExcluded(f):
+			r.excluded = append(r.excluded, f.Path)
+		case f.Status != "removed":
+			patches[i] = compressPatch(f.Patch)
+			order = append(order, i)
 		}
-		order = append(order, i)
 	}
 	sort.SliceStable(order, func(a, b int) bool {
 		fa, fb := files[order[a]], files[order[b]]
@@ -299,25 +314,34 @@ func allocateL2(files []github.File, budget int) ([]FileContext, int, []string, 
 		return fa.Additions+fa.Deletions > fb.Additions+fb.Deletions
 	})
 
-	kept := make(map[int]bool, len(order))
-	used := 0
+	kept := make(map[int]string, len(order))
+	var overflow []int
 	for _, i := range order {
-		patchTokens := estimateTokens(files[i].Patch)
-		if used+patchTokens > budget {
-			dropped = append(dropped, files[i].Path)
+		t := estimateTokens(patches[i])
+		if r.used+t > budget {
+			overflow = append(overflow, i)
 			continue
 		}
-		kept[i] = true
-		used += patchTokens
+		kept[i], r.used = patches[i], r.used+t
+	}
+	for _, i := range overflow {
+		if left := budget - r.used; left >= minClipTokens {
+			if p, ok := clipPatch(patches[i], left); ok {
+				kept[i], r.used = p, r.used+estimateTokens(p)
+				r.clipped = append(r.clipped, files[i].Path)
+				continue
+			}
+		}
+		r.dropped = append(r.dropped, files[i].Path)
 	}
 
-	out := make([]FileContext, 0, len(kept))
+	r.files = make([]FileContext, 0, len(kept))
 	for i, f := range files {
-		if kept[i] {
-			out = append(out, FileContext{Path: f.Path, Patch: f.Patch})
+		if p, ok := kept[i]; ok {
+			r.files = append(r.files, FileContext{Path: f.Path, Patch: p})
 		}
 	}
-	return out, used, dropped, excluded
+	return r
 }
 
 // estimateTokens 粗略估 token 数（不引 tiktoken 等真实分词器，按字符数 / 3 近似）。

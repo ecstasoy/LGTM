@@ -2,6 +2,7 @@ package prctx
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -121,5 +122,92 @@ func TestLayered_L2KeepsPROrder(t *testing.T) {
 	}
 	if got := strings.Join(l2Paths(ctx), ","); got != "README.md,b.go,a_test.go" {
 		t.Errorf("L2 order = %s", got)
+	}
+}
+
+func TestCompressPatch_DropsDeletionOnlyHunks(t *testing.T) {
+	patch := "@@ -1,3 +1,1 @@\n-old1\n-old2\n ctx\n@@ -10,2 +8,2 @@\n-a\n+b\n ctx"
+	got := compressPatch(patch)
+	if strings.Contains(got, "old1") {
+		t.Errorf("deletion-only hunk should be gone: %q", got)
+	}
+	if !strings.Contains(got, "@@ -10,2 +8,2 @@\n-a\n+b") {
+		t.Errorf("mixed hunk must survive verbatim: %q", got)
+	}
+	if !strings.Contains(got, "1 deletion-only hunk") {
+		t.Errorf("missing omission marker: %q", got)
+	}
+	if plain := "@@ -1 +1 @@\n-a\n+b"; compressPatch(plain) != plain {
+		t.Errorf("patch with nothing to drop must be unchanged")
+	}
+}
+
+func TestClipPatch(t *testing.T) {
+	h := func(n int) string { return fmt.Sprintf("@@ -%d,1 +%d,1 @@\n", n, n) + strings.Repeat("+line\n", 60) }
+	patch := h(1) + h(100) + h(200)
+	got, ok := clipPatch(patch, estimateTokens(h(1))+estimateTokens(h(100))+clipMarkerTokens+5)
+	if !ok {
+		t.Fatal("two hunks fit, clip should succeed")
+	}
+	if !strings.Contains(got, "+100,1") || strings.Contains(got, "+200,1") {
+		t.Errorf("should keep the first two whole hunks only: %q", firstN(got, 120))
+	}
+	if !strings.Contains(got, "2 of 3 hunks") {
+		t.Errorf("missing clip marker: %q", got[len(got)-60:])
+	}
+
+	part, ok := clipPatch(h(1), clipMarkerTokens+30)
+	if !ok || !strings.HasPrefix(part, "@@ -1,1 +1,1 @@\n+line") || strings.Count(part, "+line") >= 60 {
+		t.Errorf("an oversized single hunk should be cut at a line boundary: %q", part)
+	}
+
+	if _, ok := clipPatch(strings.Repeat("x", 5000), 100); ok {
+		t.Errorf("a single line over budget cannot be clipped")
+	}
+}
+
+func TestLayered_RemovedFilesSkipL2(t *testing.T) {
+	b := NewLayeredBuilder()
+	pr := newPR([]github.File{
+		{Path: "old.go", Status: "removed", Patch: "@@ -1,2 +0,0 @@\n-a\n-b", Deletions: 2},
+		{Path: "new.go", Status: "added", Patch: "@@ -0,0 +1 @@\n+a", Additions: 1},
+	})
+	ctx, err := b.Build(context.Background(), pr)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if got := l2Paths(ctx); len(got) != 1 || got[0] != "new.go" {
+		t.Errorf("L2 = %v, want new.go only", got)
+	}
+	if len(ctx.BudgetReport.Dropped) != 0 {
+		t.Errorf("a removed file is not a budget casualty: %v", ctx.BudgetReport.Dropped)
+	}
+	if !strings.Contains(ctx.L1Meta, "- old.go (removed)") {
+		t.Errorf("L1 should still say the file was removed: %q", ctx.L1Meta)
+	}
+}
+
+func TestLayered_ClipsInsteadOfDropping(t *testing.T) {
+	b := NewLayeredBuilder(WithTokenLimit(3000))
+	hunks := ""
+	for i := range 60 {
+		hunks += fmt.Sprintf("@@ -%d,1 +%d,1 @@\n", i*100+1, i*100+1) + strings.Repeat("+code\n", 40)
+	}
+	pr := newPR([]github.File{
+		{Path: "small.go", Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b", Additions: 1, Deletions: 1},
+		{Path: "big.go", Status: "modified", Patch: hunks, Additions: 2400},
+	})
+	ctx, err := b.Build(context.Background(), pr)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !contains(ctx.BudgetReport.Clipped, "big.go") || contains(ctx.BudgetReport.Dropped, "big.go") {
+		t.Errorf("big.go should be clipped, not dropped: clipped=%v dropped=%v", ctx.BudgetReport.Clipped, ctx.BudgetReport.Dropped)
+	}
+	if !contains(l2Paths(ctx), "small.go") {
+		t.Errorf("small.go should fit whole: %v", l2Paths(ctx))
+	}
+	if ctx.BudgetReport.UsedL2 > 3000-ctx.BudgetReport.UsedL1 {
+		t.Errorf("clipping overran the budget: used L2=%d", ctx.BudgetReport.UsedL2)
 	}
 }
