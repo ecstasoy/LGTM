@@ -309,6 +309,8 @@ type budgetReportPayload struct {
 	UsedL3     int      `json:"used_l3"`
 	UsedL4     int      `json:"used_l4,omitempty"`
 	Dropped    []string `json:"dropped,omitempty"`
+	Clipped    []string `json:"clipped,omitempty"`
+	Excluded   []string `json:"excluded,omitempty"`
 }
 
 // toBudgetPayload converts a prctx.BudgetReport into the API shape; safe on the zero value.
@@ -320,6 +322,8 @@ func toBudgetPayload(b prctx.BudgetReport) *budgetReportPayload {
 		UsedL3:     b.UsedL3,
 		UsedL4:     b.UsedL4,
 		Dropped:    b.Dropped,
+		Clipped:    b.Clipped,
+		Excluded:   b.Excluded,
 	}
 }
 

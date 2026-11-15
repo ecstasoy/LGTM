@@ -34,6 +34,20 @@
 {{ end }}
 请勿对这些文件下风险结论（既不报风险也不假设其安全）。
 {{ end }}
+{{ with .BudgetReport.Clipped }}
+## 仅部分审阅的文件（diff 被截断）
+以下文件的 diff 为了放进上下文预算被截断，上文对应部分以「diff clipped」一行结尾：
+{{ range . }}- {{ . }}
+{{ end }}
+只对已展示的 hunk 下结论，被截掉的部分既不报风险也不假设其安全。
+{{ end }}
+{{ with .BudgetReport.Excluded }}
+## lockfile 与生成文件（有意未提供 diff）
+以下文件有改动，但属于 lockfile 或生成代码，未提供 diff：
+{{ range . }}- {{ . }}
+{{ end }}
+请勿对这些文件报风险。
+{{ end }}
 ## 任务
 仅输出**严格 JSON**（不要任何额外文字、不要 Markdown 代码块），结构如下：
 
