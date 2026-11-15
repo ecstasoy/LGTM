@@ -23,7 +23,7 @@
 - "bot 通过"按以下标准判定：
   - 只看最新 head commit 上的那次 bot 评审，其中每条建议都已修复或已回复不修的理由；
   - 为处理 bot 建议追加的 push 最多 2 轮；
-  - CI 跑绿后 15 分钟内 bot 没有评审，就注明"bot 未评审"并照常交付。
+  - **最新 head commit** 的 CI 跑完 15 分钟后仍没有 bot 评审，就注明"bot 未评审"并照常交付；报告前要再确认一次 head 没有变。
 - 交叉审查在以下情况触发，审查者必须是与实现者不同的 agent，每个 PR 最多审 2 轮：
   - 改动涉及 `backend/internal/api/{webhook,auth,perms,steer}.go`、`backend/internal/oauth/`、`backend/internal/store/*.sql`；
   - 改动涉及 `.github/workflows/`、`backend/Dockerfile`、`backend/fly.toml`；
@@ -183,7 +183,7 @@
   `ls -l AGENTS.md CLAUDE.md docs/agent-*.md docs/self-hosting-readiness.md docs/competitor-signals.md && git add -A -n | grep -cE 'AGENTS|CLAUDE|agent-|self-hosting|competitor' ; test -d frontend/node_modules && echo deps-ok`
   期望：6 个都是指向主 checkout 的软链接；`grep -c` 输出 `0`；打印 `deps-ok`。
   再手动跑一次：`ORCA_ROOT_PATH=<主 checkout> ORCA_WORKTREE_PATH="$PWD" sh <主 checkout>/.claude/orca-setup.sh`，期望 6 个文件全部打印"跳过"。
-  最后让 Orca 删除 `setup-check` 这个 worktree。
+  最后运行 `orca worktree rm --worktree name:setup-check`，再运行 `orca worktree list --json | grep -c setup-check`，期望输出 `0`。
 
 ### Task 5: 试跑：协调者并行派 3 个真实小任务
 
