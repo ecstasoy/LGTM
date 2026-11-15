@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // postSlashComment delivers a signed issue_comment webhook carrying body from a commenter with the given association.
@@ -66,5 +69,20 @@ func TestWebhook_SlashCommand_OnlyTrustedCommentersQueueWork(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestWebhook_SlashReview_CooldownPerPR(t *testing.T) {
+	r := slashRouter(Deps{Fetcher: errFetcher{}, Cache: store.NewMemoryCache(time.Minute)})
+
+	if w := postSlashComment(t, r, "s", "/lgtm review", "OWNER", 7); w.Code != http.StatusAccepted {
+		t.Fatalf("first command: status=%d body=%s, want 202", w.Code, w.Body.String())
+	}
+	w := postSlashComment(t, r, "s", "/lgtm review", "OWNER", 7)
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte("cooldown")) {
+		t.Errorf("repeat on the same PR: status=%d body=%s, want 200 cooldown", w.Code, w.Body.String())
+	}
+	if w := postSlashComment(t, r, "s", "/lgtm review", "OWNER", 8); w.Code != http.StatusAccepted {
+		t.Errorf("another PR: status=%d body=%s, want 202", w.Code, w.Body.String())
 	}
 }

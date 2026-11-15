@@ -220,6 +220,13 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 		"cmd", cmd, "owner", p.Repository.Owner.Login, "repo", p.Repository.Name,
 		"pr", p.Issue.Number, "sender", p.Sender.Login)
 
+	if cmd == "review" && !slashReviewAllowed(c.Request.Context(), d.Cache, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number) {
+		slog.Info("webhook: /lgtm review ignored during cooldown",
+			"owner", p.Repository.Owner.Login, "repo", p.Repository.Name, "pr", p.Issue.Number, "sender", p.Sender.Login)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "cooldown"})
+		return
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "queued": true, "cmd": cmd})
 
 	switch cmd {
@@ -240,6 +247,25 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 		// ack unrecognized commands too, listing what is available
 		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
 	}
+}
+
+// slashReviewCooldown bounds how often /lgtm review can start work on one PR, so a review that keeps
+// failing (and so never reaches the cache) cannot be re-run back-to-back.
+const slashReviewCooldown = 2 * time.Minute
+
+// slashReviewAllowed reports whether this PR is outside its cooldown, starting a new one if so.
+// No cache or a cache error lets the command through: only trusted commenters get this far.
+func slashReviewAllowed(ctx context.Context, cache store.Cache, owner, repo string, number int) bool {
+	if cache == nil {
+		return true
+	}
+	key := fmt.Sprintf("slash-review-cooldown:%s/%s#%d", strings.ToLower(owner), strings.ToLower(repo), number)
+	n, err := cache.Incr(ctx, key, slashReviewCooldown)
+	if err != nil {
+		slog.Warn("slash review cooldown check failed; allowing", "key", key, "err", err)
+		return true
+	}
+	return n == 1
 }
 
 // trustedCommenter lists the author_association values allowed to run slash commands.
