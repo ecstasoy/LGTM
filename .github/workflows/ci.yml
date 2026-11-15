@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # A new push supersedes an in-flight PR run; runs on main are never cancelled because they gate the deploy
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     name: Backend (go test + vet)
