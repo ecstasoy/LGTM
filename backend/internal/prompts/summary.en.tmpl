@@ -34,6 +34,20 @@ The files below were changed, but their diffs exceeded the context budget and we
 {{ end }}
 Draw no conclusions about what is in them; if coverage is incomplete, name the uncovered files explicitly under "Overview".
 {{ end }}
+{{ with .BudgetReport.Clipped }}
+## Files reviewed only in part (diff clipped)
+The diffs of the files below were cut to fit the context budget; each ends above with a "diff clipped" line:
+{{ range . }}- {{ . }}
+{{ end }}
+Say under "Overview" that these files were only partly reviewed.
+{{ end }}
+{{ with .BudgetReport.Excluded }}
+## Lockfiles and generated files (diff left out on purpose)
+These files changed, but they are lockfiles or generated code, so their diffs were not supplied:
+{{ range . }}- {{ . }}
+{{ end }}
+You may note that they changed, but do not guess at their contents.
+{{ end }}
 ## Task
 Write the review summary in English using the Markdown structure below, **keeping the whole thing between 150 and 300 words**. Do not narrate your reasoning, do not add meta-commentary (such as "Here is the summary"), do not emit JSON.
 
