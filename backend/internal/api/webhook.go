@@ -264,7 +264,14 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		return
 	}
 
+	release, ok := claimReview(ctx, d, pr)
+	if !ok {
+		replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number, fmt.Sprintf(
+			"⏳ A review of commit `%s` is already running; it will be posted here when it finishes.", shortSHA(pr.HeadSHA)))
+		return
+	}
 	if rec := cachedReview(ctx, d, pr); rec != nil {
+		release()
 		replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number, fmt.Sprintf(
 			"✅ LGTM already reviewed commit `%s`: %s%s\n\nPush a new commit to get a fresh review.",
 			shortSHA(pr.HeadSHA), reviewPageBase, rec.ID))
@@ -286,6 +293,7 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		PRAuthorLogin:  args.PRAuthorLogin,
 		TriggerAction:  "slash_review",
 		Prefetched:     &pr,
+		Release:        release,
 	})
 }
 
@@ -307,6 +315,27 @@ func replyAsBot(ctx context.Context, d Deps, installationID int64, owner, repo s
 	if _, err := d.OAuthClient.PostIssueComment(ctx, tok.Token, owner, repo, number, body); err != nil {
 		slog.Warn("bot reply: post comment failed", "err", err)
 	}
+}
+
+// claimTTL outlives the 5-minute review timeout, so a crashed run cannot hold its commit forever.
+const claimTTL = 10 * time.Minute
+
+// claimReview marks this commit as being reviewed; false means another run, here or on another machine, has it.
+// A cache failure lets the review go ahead: a duplicate review beats none.
+func claimReview(ctx context.Context, d Deps, pr gh.PullRequest) (release func(), ok bool) {
+	if d.Cache == nil {
+		return func() {}, true
+	}
+	key := fmt.Sprintf("review-claim:%s/%s#%d@%s:%s", pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, effectiveDefaultLocale(d))
+	n, err := d.Cache.Incr(ctx, key, claimTTL)
+	if err != nil {
+		slog.Warn("webhook: review claim failed; reviewing anyway", "err", err)
+		return func() {}, true
+	}
+	if n > 1 {
+		return nil, false
+	}
+	return func() { _ = d.Cache.Delete(context.Background(), key) }, true
 }
 
 // cachedReview returns the stored review for this head commit in the webhook locale, or nil.
@@ -384,6 +413,8 @@ type webhookReviewArgs struct {
 	TriggerAction string
 	// Prefetched skips the GitHub fetch when the caller already has the PR (the slash path checks the cache first).
 	Prefetched *gh.PullRequest
+	// Release, when set, means the caller already claimed this commit; the run releases it when done.
+	Release func()
 }
 
 // runWebhookReview runs the review in the background, then persists, pushes a notification and posts the bot review
@@ -406,6 +437,16 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	// webhook has no user request to negotiate a locale from; it always uses the deployment-configured default
 	// (already normalized to "zh"/"en" at startup — see Deps.DefaultLocale / effectiveDefaultLocale).
 	locale := effectiveDefaultLocale(d)
+
+	release := args.Release
+	if release == nil {
+		var ok bool
+		if release, ok = claimReview(ctx, d, pr); !ok {
+			slog.Info("webhook: commit already being reviewed, skipping", "pr", pr.Number, "head", shortSHA(pr.HeadSHA))
+			return
+		}
+	}
+	defer release()
 
 	// idempotency check: an existing review for the same (owner, repo, pr, head_sha, locale) → skip
 	{

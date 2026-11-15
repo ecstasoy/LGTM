@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
 	"github.com/ecstasoy/LGTM/backend/internal/i18n"
@@ -87,6 +88,7 @@ func slashDeps(t *testing.T, api *fakeGitHubAPI, p llm.Provider) (Deps, store.St
 		Fetcher:       fakeFetcher{pr: pr},
 		Provider:      p,
 		Store:         s,
+		Cache:         store.NewMemoryCache(time.Minute),
 		DefaultLocale: i18n.EN,
 		OAuthClient: &oauth.Client{
 			AppID: 1, PrivateKeyPEM: testAppKey(t), HTTPClient: &http.Client{Transport: api},

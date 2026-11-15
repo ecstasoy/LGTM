@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/i18n"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/oauth"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 func botClient(t *testing.T, api *fakeGitHubAPI) *oauth.Client {
@@ -48,5 +53,70 @@ func TestPostBotReview_PostsWhenHeadUnknown(t *testing.T) {
 	}
 	if _, reviews := api.snapshot(); reviews != 1 {
 		t.Errorf("want 1 review, got %d", reviews)
+	}
+}
+
+func TestClaimReview_OneRunPerCommit(t *testing.T) {
+	d := Deps{Cache: store.NewMemoryCache(time.Minute), DefaultLocale: i18n.EN}
+	ctx := context.Background()
+
+	release, ok := claimReview(ctx, d, reviewedPR)
+	if !ok {
+		t.Fatal("first claim should win")
+	}
+	if _, again := claimReview(ctx, d, reviewedPR); again {
+		t.Fatal("second claim on the same commit must lose")
+	}
+	other := reviewedPR
+	other.HeadSHA = "new1111"
+	if _, ok := claimReview(ctx, d, other); !ok {
+		t.Fatal("a different commit is a separate claim")
+	}
+	release()
+	if _, ok := claimReview(ctx, d, reviewedPR); !ok {
+		t.Fatal("released commit should be claimable again")
+	}
+}
+
+func TestClaimReview_NoCacheAlwaysWins(t *testing.T) {
+	if _, ok := claimReview(context.Background(), Deps{}, reviewedPR); !ok {
+		t.Fatal("without a cache there is nothing to coordinate on")
+	}
+}
+
+// A duplicate delivery or a push racing /lgtm review must not review the same commit twice.
+func TestWebhookReview_SkipsWhileSameCommitClaimed(t *testing.T) {
+	api := &fakeGitHubAPI{}
+	prov := &countingProvider{inner: llm.NewMockProvider()}
+	d, _ := slashDeps(t, api, prov)
+	pr, _ := d.Fetcher.Fetch(context.Background(), "")
+	if _, ok := claimReview(context.Background(), d, pr); !ok {
+		t.Fatal("setup claim failed")
+	}
+
+	runWebhookReview(d, webhookReviewArgs{PrURL: "u", Owner: "o", Repo: "r", Number: 7, InstallationID: 99, TriggerAction: "synchronize"})
+
+	if prov.calls.Load() != 0 {
+		t.Errorf("model called %d times for a commit already being reviewed", prov.calls.Load())
+	}
+}
+
+func TestSlashReview_CommitInProgress_SaysSo(t *testing.T) {
+	api := &fakeGitHubAPI{}
+	prov := &countingProvider{inner: llm.NewMockProvider()}
+	d, _ := slashDeps(t, api, prov)
+	pr, _ := d.Fetcher.Fetch(context.Background(), "")
+	if _, ok := claimReview(context.Background(), d, pr); !ok {
+		t.Fatal("setup claim failed")
+	}
+
+	runSlashReview(d, slashArgs())
+
+	comments, _ := api.snapshot()
+	if len(comments) != 1 || !strings.Contains(comments[0], "already running") || !strings.Contains(comments[0], "`abc1234`") {
+		t.Errorf("want one in-progress reply, got %q", comments)
+	}
+	if prov.calls.Load() != 0 {
+		t.Errorf("no model calls expected")
 	}
 }
