@@ -1,7 +1,8 @@
 # Deploys the backend to Fly.io once CI has passed on a push to main; the frontend ships through Vercel's Git integration
 #
-# Trigger: CI completing on main. A deploy only happens when CI succeeded and the pushed commit touched
-#          backend / frontend / docs / .dockerignore / this file — the image bakes in frontend and docs for indexrepo.
+# Trigger: CI completing on main. A deploy only happens when CI succeeded and something under
+#          backend / frontend / docs / .dockerignore / this workflow changed since the commit Fly is running —
+#          the image bakes in frontend and docs for indexrepo. See .github/scripts/deploy-decision.sh.
 #          workflow_dispatch forces a deploy, e.g. to refresh the RAG index without a code change.
 #
 # Credentials: FLY_API_TOKEN repo secret (`flyctl tokens create deploy -x 90d`)
@@ -20,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  # One deploy at a time; a later run waits instead of cancelling, so deploys never land out of order
+  # One deploy at a time; a newer pending run replaces an older one, which is safe because each run diffs against what is live
   group: deploy-backend
   cancel-in-progress: false
 
@@ -37,36 +38,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Deploy exactly the commit CI tested, not whatever main points at now
+          # Deploy exactly the commit CI tested, not whatever main points at now; full history for the diff below
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 2
-
-      # workflow_run has no `paths` filter, so diff the pushed commit against its first parent instead
-      - name: Check deploy-relevant changes
-        id: changes
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(backend/|frontend/|docs/|\.dockerignore$|\.github/workflows/deploy\.yml$)'; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "No deploy-relevant changes; skipping deploy"
-          fi
+          fetch-depth: 0
 
       - name: Setup flyctl
-        if: steps.changes.outputs.deploy == 'true'
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be
 
-      - name: Deploy
-        if: steps.changes.outputs.deploy == 'true'
+      # Diff against the commit Fly runs now, not HEAD^1: a pending run cancelled by a newer one, a rebase
+      # merge, or a re-run of an older CI must neither drop a change nor roll production back
+      - name: Decide whether to deploy
+        id: decide
+        shell: bash
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        # --remote-only builds on Fly's builder; the build context is the repo root so the image can copy backend + frontend + docs
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          flyctl image show --config backend/fly.toml --json > "$RUNNER_TEMP/image.json"
+          bash .github/scripts/deploy-decision.sh "$(git rev-parse HEAD)" "$RUNNER_TEMP/image.json" "$EVENT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy
+        if: steps.decide.outputs.deploy == 'true'
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        # --remote-only builds on Fly's builder; the build context is the repo root so the image can copy backend + frontend + docs.
+        # LGTM_DEPLOY_SHA is what the next run diffs against.
         run: |
           flyctl deploy --remote-only \
             --config backend/fly.toml \
             --dockerfile backend/Dockerfile \
+            --label "LGTM_DEPLOY_SHA=$(git rev-parse HEAD)" \
             .
