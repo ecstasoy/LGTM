@@ -1,13 +1,17 @@
-// 后端 HTTP 服务入口：装配 slog → 加载 .env → 读配置 → 构造依赖 → Gin → 注册路由。
+// Backend HTTP entrypoint: slog → .env → config → deps → Gin → routes.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
@@ -28,10 +32,10 @@ import (
 )
 
 func main() {
-	// 全局 JSON 结构化日志
+	// Global JSON structured logging
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-	// 尝试加载 .env（相对于当前工作目录）；生产环境一般无 .env：文件不存在时忽略，其它错误给出告警
+	// Load .env relative to the working directory if present; production usually has none, so a missing file is ignored and other errors warn
 	for _, p := range []string{".env", "backend/.env"} {
 		if err := godotenv.Load(p); err == nil {
 			slog.Info("loaded env file", "path", p)
@@ -43,7 +47,7 @@ func main() {
 
 	cfg := config.MustLoad()
 
-	// OpenTelemetry：OTLP_ENDPOINT 非空时初始化 trace provider；空时 noop
+	// OpenTelemetry: a trace provider when OTLP_ENDPOINT is set, noop otherwise
 	otelEndpoint := strings.TrimSpace(cfg.OTLPEndpoint)
 	otelCleanup, err := observability.InitTracer(observability.OTelConfig{
 		Endpoint:    otelEndpoint,
@@ -81,8 +85,8 @@ func main() {
 		slog.Info("client IP resolved from platform header", "header", cfg.TrustedPlatform)
 	}
 
-	// 配置受信代理：用于 c.ClientIP() 正确解析 X-Forwarded-For。
-	// 未配置时显式禁用代理信任，退回 RemoteAddr 解析。
+	// Trusted proxies let c.ClientIP() read X-Forwarded-For.
+	// Left unset, proxy trust is disabled explicitly and ClientIP falls back to RemoteAddr.
 	if cfg.TrustedProxies == "" {
 		if err := r.SetTrustedProxies(nil); err != nil {
 			slog.Warn("set trusted proxies failed", "err", err)
@@ -107,25 +111,44 @@ func main() {
 	api.RegisterWithSecret(r, deps, cfg.GithubAppWebhookSec)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
+	srv := &http.Server{Addr: addr, Handler: r}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	serveErr := make(chan error, 1)
 	slog.Info("server starting", "addr", addr)
-	if err := r.Run(addr); err != nil {
+	go func() { serveErr <- srv.ListenAndServe() }()
+	select {
+	case err := <-serveErr:
 		slog.Error("server exited", "err", err)
 		os.Exit(1)
+	case <-ctx.Done():
 	}
+	// Restore default signal handling so a second signal kills the process outright.
+	stop()
+
+	slog.Info("stop signal received; draining in-flight work", "timeout", cfg.ShutdownTimeout.String())
+	drainCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
+	if err := api.Drain(drainCtx, srv, deps.Background); err != nil {
+		slog.Error("drain timed out; remaining work was cut off", "err", err)
+		return
+	}
+	slog.Info("server drained")
 }
 
-// buildDeps 按配置选 Provider；明示用户意图与最终走向，缺 key 显式 warn 而非静默降级。
-// Store 打开失败仅 warn，handler 已 nil-safe；缓存 + 历史功能降级停用而非整个服务挂。
+// buildDeps picks providers from config, logging what was asked for and what was used; a missing key warns instead of degrading silently.
+// A store that fails to open only warns since handlers are nil-safe: caching and history switch off instead of the whole service going down.
 func buildDeps(cfg config.Config) api.Deps {
 	registry := buildRegistry(cfg)
 	defProvider, _ := registry.Default()
 	deps := api.Deps{
 		Fetcher:  gh.NewRealFetcher(cfg.GithubToken),
-		Provider: defProvider, // 注册表默认项；agent / 其它路径仍用它
-		Models:   registry,    // L2：按阶段 / 按请求经注册表解析 provider+model
-		// Builder 先占位 NewLayeredBuilder()，等下面构造完 retriever 后再用 WithRetriever 替换
+		Provider: defProvider, // registry default; the agent and other paths still use it
+		Models:   registry,    // L2: per-stage / per-request provider+model resolved through the registry
+		// placeholder NewLayeredBuilder(), replaced via WithRetriever once the retriever below is built
 		Builder: prctx.NewLayeredBuilder(),
-		// 按阶段模型覆盖（L1）：空值走 provider 默认
+		// per-stage model overrides (L1): empty falls through to the provider default
 		StageModels: map[string]string{
 			"summary":     cfg.SummaryModel,
 			"risks":       cfg.RisksModel,
@@ -133,13 +156,14 @@ func buildDeps(cfg config.Config) api.Deps {
 		},
 		// DefaultLocale: normalized once at startup so only "zh"/"en" ever reach the request-boundary resolver.
 		DefaultLocale: i18n.Normalize(cfg.DefaultLocale, i18n.ZH),
+		Background:    &api.Background{},
 	}
 	if cfg.SummaryModel != "" || cfg.RisksModel != "" || cfg.SuggestionsModel != "" {
 		slog.Info("per-stage model routing",
 			"summary", cfg.SummaryModel, "risks", cfg.RisksModel, "suggestions", cfg.SuggestionsModel)
 	}
-	// Store 二选一：POSTGRES_URL 非空走 PostgresStore，否则走 SQLite
-	// 失败时仅 warn，handler 已 nil-safe；缓存 + 历史功能降级停用而非整个服务挂
+	// Store: PostgresStore when POSTGRES_URL is set, SQLite otherwise
+	// a failed open only warns since handlers are nil-safe; caching and history switch off instead of the service going down
 	if cfg.PostgresURL != "" {
 		if s, err := store.NewPostgresStore(cfg.PostgresURL); err != nil {
 			slog.Error("open postgres store failed; falling back to SQLite", "err", err)
@@ -151,8 +175,8 @@ func buildDeps(cfg config.Config) api.Deps {
 	} else {
 		deps.Store = openSQLiteFallback(cfg.SQLitePath)
 	}
-	// Cache 二选一：REDIS_URL 非空走 RedisCache（v3 真部署跨实例共享），否则走 MemoryCache
-	// 失败时降级 MemoryCache + Error log，rate limit 仍单机计数不会挂
+	// Cache: RedisCache when REDIS_URL is set (shared across instances), MemoryCache otherwise
+	// a failed connect falls back to MemoryCache with an Error log; rate limiting keeps counting per instance
 	if cfg.RedisURL != "" {
 		if c, err := store.NewRedisCache(cfg.RedisURL); err != nil {
 			slog.Error("open redis cache failed; falling back to MemoryCache", "err", err)
@@ -166,9 +190,9 @@ func buildDeps(cfg config.Config) api.Deps {
 		deps.Cache = store.NewMemoryCache(0)
 		slog.Info("cache ready", "type", "memory")
 	}
-	// Embedder：v3 RAG 用。缺 key / EMBEDDING_PROVIDER=mock 走 mock；openai 需 EMBEDDING_API_KEY
+	// Embedder for RAG: mock without a key or with EMBEDDING_PROVIDER=mock; openai needs EMBEDDING_API_KEY
 	deps.Embedder = pickEmbedder(cfg)
-	// Retriever：sqlite-backed brute-force cosine；失败降级 NoopRetriever
+	// Retriever: sqlite-backed brute-force cosine; falls back to NoopRetriever on failure
 	if cfg.RAGDBPath != "" {
 		if dir := filepath.Dir(cfg.RAGDBPath); dir != "" && dir != "." {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -181,7 +205,7 @@ func buildDeps(cfg config.Config) api.Deps {
 			deps.Indexer = index.NoopIndexer{}
 		} else {
 			deps.Retriever = rt
-			deps.Indexer = rt // SQLiteRetriever 同时实现 Retriever + Indexer
+			deps.Indexer = rt // SQLiteRetriever implements both Retriever and Indexer
 			slog.Info("retriever ready", "type", "sqlite", "path", cfg.RAGDBPath)
 		}
 	} else {
@@ -189,16 +213,16 @@ func buildDeps(cfg config.Config) api.Deps {
 		deps.Indexer = index.NoopIndexer{}
 		slog.Info("retriever ready", "type", "noop")
 	}
-	// 重新构造 Builder 注入 Retriever；prctx.LayeredBuilder.buildL4 用它召回 RAG references
+	// rebuild Builder with the Retriever; prctx.LayeredBuilder.buildL4 recalls RAG references through it
 	deps.Builder = prctx.NewLayeredBuilder(prctx.WithRetriever(deps.Retriever))
 
-	// Memory：会话记忆走 deps.Cache（Redis 跨实例 / Memory 本地）；默认 cap=10 turn / TTL=7d
-	// 失败 / nil 时 SessionStore 是 nil，steer.go agent 路径会 skip load/save，不影响主流程
+	// Memory: session memory on deps.Cache (Redis across instances / in-memory locally); defaults cap=10 turns / TTL=7d
+	// on failure / nil the SessionStore is nil and the steer.go agent path skips load/save without touching the main flow
 	deps.Memory = memory.NewCacheSessionStore(deps.Cache, 0, 0)
 	slog.Info("memory ready", "max_turns", memory.DefaultMaxTurns, "ttl", memory.DefaultTTL)
 
-	// OAuth：缺 client_id / client_secret 时跳过；handler 自己返 503
-	// 同时 SessionManager 复用 deps.Cache（Redis 跨实例共享 session）
+	// OAuth: skipped without client_id / client_secret; the handlers return 503 themselves
+	// SessionManager reuses deps.Cache too (sessions shared across instances on Redis)
 	if cfg.GithubOAuthClientID != "" && cfg.GithubOAuthSecret != "" {
 		deps.OAuthClient = &oauth.Client{
 			ClientID:      cfg.GithubOAuthClientID,
@@ -234,8 +258,8 @@ func pickEmbedder(cfg config.Config) index.Embedder {
 	}
 }
 
-// openSQLiteFallback 公用 SQLite 打开逻辑：确保父目录存在 + 打开 + warn 失败 → nil
-// 抽出来方便 buildDeps 内两条分支复用
+// openSQLiteFallback opens SQLite: ensures the parent dir exists, opens it, warns and returns nil on failure
+// shared by both store branches in buildDeps
 func openSQLiteFallback(path string) store.Store {
 	if path != ":memory:" {
 		if dir := filepath.Dir(path); dir != "" && dir != "." {
@@ -253,9 +277,9 @@ func openSQLiteFallback(path string) store.Store {
 	return s
 }
 
-// buildRegistry 构造 L2 具名模型注册表。
-//   - LLM_MODELS 为空 / 解析失败 → 单默认项（来自 LLM_PROVIDER/OPENAI_*/LLM_MODEL），等价 legacy 行为。
-//   - 否则按 JSON 数组逐项构造；每项 key 从 api_key_env 指定的环境变量取（缺 key 降级 mock，不阻塞启动）。
+// buildRegistry builds the L2 named model registry.
+//   - LLM_MODELS empty / unparsable → a single default entry (from LLM_PROVIDER/OPENAI_*/LLM_MODEL), same as legacy.
+//   - otherwise one entry per JSON item; each key comes from the env var named by api_key_env (a missing key degrades to mock without blocking startup).
 func buildRegistry(cfg config.Config) *llm.Registry {
 	single := func() *llm.Registry {
 		prov := pickProvider(cfg)
@@ -291,7 +315,7 @@ func buildRegistry(cfg config.Config) *llm.Registry {
 }
 
 func pickProvider(cfg config.Config) llm.Provider {
-	// LLM_PROVIDER 不区分大小写，容忍 "OpenAI" / "OPENAI" / "openai" 等写法
+	// LLM_PROVIDER is case-insensitive: "OpenAI" / "OPENAI" / "openai" all work
 	switch strings.ToLower(strings.TrimSpace(cfg.LLMProvider)) {
 	case "openai":
 		if cfg.OpenAIAPIKey == "" {

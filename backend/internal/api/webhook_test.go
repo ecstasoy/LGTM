@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -142,6 +143,61 @@ func TestWebhook_AcceptsSynchronizeAction(t *testing.T) {
 	}
 	if !bytes.Contains(w.Body.Bytes(), []byte(`"action":"synchronize"`)) {
 		t.Errorf("body should echo synchronize action; got %s", w.Body.String())
+	}
+}
+
+// blockingFetcher holds Fetch until release closes, standing in for a slow GitHub call.
+type blockingFetcher struct{ release chan struct{} }
+
+func (f blockingFetcher) Fetch(ctx context.Context, _ string) (gh.PullRequest, error) {
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+	}
+	return gh.PullRequest{}, errors.New("stub")
+}
+
+func TestWebhook_ReviewRunsAsTrackedBackgroundWork(t *testing.T) {
+	cases := []struct {
+		name, event, body string
+	}{
+		{"pull_request", "pull_request",
+			`{"action":"synchronize","number":42,"pull_request":{"html_url":"https://github.com/o/r/pull/42","title":"x"},"repository":{"owner":{"login":"o"},"name":"r"},"installation":{"id":1},"sender":{"login":"u"}}`},
+		{"slash_review", "issue_comment",
+			`{"action":"created","issue":{"number":42,"title":"x","pull_request":{"html_url":"https://github.com/o/r/pull/42"}},"comment":{"body":"/lgtm review"},"repository":{"owner":{"login":"o"},"name":"r"},"sender":{"login":"u"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			release := make(chan struct{})
+			bg := &Background{}
+			secret := "s"
+			r := gin.New()
+			r.POST("/api/webhook/github", WebhookGitHub(Deps{Fetcher: blockingFetcher{release}, Background: bg}, secret))
+
+			body := []byte(tc.body)
+			mac := hmac.New(sha256.New, []byte(secret))
+			mac.Write(body)
+			req := httptest.NewRequest(http.MethodPost, "/api/webhook/github", bytes.NewReader(body))
+			req.Header.Set("X-GitHub-Event", tc.event)
+			req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusAccepted {
+				t.Fatalf("status=%d want 202; body=%s", w.Code, w.Body.String())
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			if err := bg.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Wait err = %v while the review was still fetching; want context.DeadlineExceeded", err)
+			}
+
+			close(release)
+			if err := bg.Wait(context.Background()); err != nil {
+				t.Fatalf("Wait after the review finished: %v", err)
+			}
+		})
 	}
 }
 
