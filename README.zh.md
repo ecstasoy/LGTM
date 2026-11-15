@@ -287,7 +287,7 @@ Agent 追问也是同一套思路：先把 L1/L3/L4 注入 prompt，再让工具
 
 架构和产品形态参考过以下方向：
 
-- qodo-ai/pr-agent：多阶段评审拆分。
+- qodo-ai/pr-agent：多阶段评审拆分，以及 PR 压缩策略（文件排序、去掉纯删除 hunk、截断超大 diff）。
 - CodeRabbit：风险分级和行内 review comment 形态。
 - Greptile：跨文件上下文检索。
 - Anthropic Claude Code Review：多轮验证和工具化 reviewer 的方向。

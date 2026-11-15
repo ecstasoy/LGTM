@@ -287,7 +287,7 @@ The Go backend, the frontend components, the prompt templates, the SSE protocol,
 
 Its architecture and product shape drew on the following:
 
-- qodo-ai/pr-agent: splitting a review into multiple stages.
+- qodo-ai/pr-agent: splitting a review into multiple stages, and its PR compression strategy (ranking files, dropping deletion-only hunks, clipping oversized diffs).
 - CodeRabbit: risk grading and the shape of inline review comments.
 - Greptile: cross-file context retrieval.
 - Anthropic Claude Code Review: multi-turn verification and the tool-driven reviewer direction.
