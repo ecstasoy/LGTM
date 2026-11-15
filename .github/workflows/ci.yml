@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  # A new push supersedes an in-flight PR run; runs on main are never cancelled because they gate the deploy
+  # Superseded PR runs are cancelled; an in-progress run on main never is (a pending one may be replaced, and the next deploy diffs against what is live)
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
