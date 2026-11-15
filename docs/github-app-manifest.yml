@@ -22,6 +22,7 @@ hook_attributes:
 default_events:
   - pull_request          # PR 开 / 同步 / 关 → 触发自动评审
   - pull_request_review   # 自动评审写完 review comment 时收到回响（防自我循环）
+  - issue_comment         # PR 评论里的 /lgtm 命令；只响应 OWNER / MEMBER / COLLABORATOR
   - installation          # App 装 / 卸载（统计 + 清理）
 
 # 权限（最小集 —— 评审只需要读 + 写 comment）

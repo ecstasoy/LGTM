@@ -31,7 +31,7 @@ Reading a review needs no App installation. Installing the LGTM GitHub App on th
 - Caches results by `owner/repo/pr/head_sha`. As long as the head SHA has not changed, a past result replays directly.
 - Supports SQLite and Postgres for persistence, and MemoryCache or RedisCache for sessions, rate limiting, and notification caching.
 - Supports GitHub OAuth sign-in, with the session held in an HttpOnly cookie.
-- Supports GitHub App webhooks: `pull_request.opened`, `synchronize`, and `reopened` trigger an automatic review, and a `/lgtm review` comment on the PR reruns it by hand.
+- Supports GitHub App webhooks: `pull_request.opened`, `synchronize`, and `reopened` trigger an automatic review, and a `/lgtm review` comment on the PR reruns it by hand. Commands are honored only from repository owners, members and collaborators, at most once per PR every two minutes.
 - Can post a single suggestion as a PR review comment, and when that suggestion carries a `suggestion` code block, call the GitHub GraphQL API to apply it as a commit.
 - Supports a follow-up agent. Its sandboxed tools (`read_file`, `list_dir`, `grep_patches`) can only reach files this PR changed; with RAG wired up it also gets `search_repo`, which runs a semantic query against the repository-wide index. It never reads arbitrary paths on the local filesystem.
 

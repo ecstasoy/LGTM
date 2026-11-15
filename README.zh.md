@@ -31,7 +31,7 @@ LGTM 是一个面向 GitHub Pull Request 的评审助手。它会拉取 PR 元�
 - 按 `owner/repo/pr/head_sha` 缓存结果。head SHA 不变时可直接回放历史结果。
 - 支持 SQLite 和 Postgres 作为持久化存储，支持 MemoryCache 和 RedisCache 做 session、限流和通知缓存。
 - 支持 GitHub OAuth 登录，session 放在 HttpOnly cookie 中。
-- 支持 GitHub App webhook：`pull_request.opened`、`synchronize`、`reopened` 自动评审；PR 评论 `/lgtm review` 可手动重跑。
+- 支持 GitHub App webhook：`pull_request.opened`、`synchronize`、`reopened` 自动评审；PR 评论 `/lgtm review` 可手动重跑。只有仓库的 owner、member、collaborator 能触发命令，同一个 PR 两分钟内最多重跑一次。
 - 支持把单条建议发成 PR review comment，建议带 `suggestion` 代码块时可进一步调用 GitHub GraphQL 应用成 commit。
 - 支持追问 Agent。沙盒工具（`read_file`、`list_dir`、`grep_patches`）只能访问本 PR 改动文件；接入 RAG 后额外提供 `search_repo` 工具按 query 在全仓索引内语义检索，不会任意读本地文件系统。
 
