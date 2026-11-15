@@ -25,7 +25,11 @@ import (
 // OAuthClient + Sessions may be nil (with OAuth unconfigured, /api/auth/* returns 503)
 // Memory may be nil (disables agent follow-up session memory); worth having in production for better multi-turn follow-ups
 type Deps struct {
-	Fetcher     github.Fetcher
+	// Fetcher reads with the shared server token; it must never surface a private PR to a caller.
+	Fetcher github.Fetcher
+	// FetcherFor builds a fetcher acting as the given GitHub token (a signed-in user's), so GitHub enforces their access.
+	// Nil disables per-user fetching and every review goes through Fetcher.
+	FetcherFor  func(token string) github.Fetcher
 	Provider    llm.Provider
 	Builder     prctx.Builder
 	Store       store.Store
