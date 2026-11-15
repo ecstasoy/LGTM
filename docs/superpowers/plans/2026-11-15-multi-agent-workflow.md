@@ -53,7 +53,12 @@
   - 把 `on.push` 换成 `workflow_run: { workflows: [CI], types: [completed], branches: [main] }`，保留 `workflow_dispatch`。
   - job 级加 `if`：`github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')`。
   - checkout 用 `ref: ${{ github.event.workflow_run.head_sha || github.sha }}` 和 `fetch-depth: 2`。
-  - 原来的 `paths` 过滤（`workflow_run` 不支持）改成一个 step：`git diff --name-only HEAD^1 HEAD`。改动命中 `backend/`、`frontend/`、`docs/`、`.dockerignore`、`.github/workflows/deploy.yml` 之一，就设 `outputs.deploy=true`。`workflow_dispatch` 时直接为 true。后续 deploy step 以它为条件。
+  - 原来的 `paths` 过滤（`workflow_run` 不支持）改由 `.github/scripts/deploy-decision.sh` 决定，并配有测试 `deploy-decision_test.sh`。它用 `flyctl image show` 读出线上镜像标签里记录的已部署 commit：优先读我们自己打的 `LGTM_DEPLOY_SHA`，没有时退回 flyctl 自带的 `GH_SHA`。
+    - 要部署的 commit 已经包含在线上版本里，就跳过，防止重跑旧 CI 时把线上回滚；
+    - 从线上 commit 到这次 commit 之间，改动命中 `backend/`、`frontend/`、`docs/`、`.dockerignore` 或部署相关文件，就部署；
+    - 读不到线上 commit，就部署；`workflow_dispatch` 一律部署。
+    - deploy step 用 `--label LGTM_DEPLOY_SHA=<sha>` 给镜像打标签。
+    - 不用 `HEAD^1` 的原因（最终审阅发现）：同一个 concurrency 组只保留一个排队中的 run，后来的只改 README 的 run 会顶掉排队中的后端部署；重跑旧 CI 会回滚线上；rebase 合并只看得到最后一个 commit。
   - `concurrency` 和 `permissions` 保持不变。把文件头注释更新为英文，写一行说明触发方式。
 
 - [ ] **Step 2: 静态检查**
@@ -169,7 +174,8 @@
 
   Orca 的 CLI 没有设置钩子的命令，需要人自己操作：Orca 设置 → 本仓库 → Hooks → Setup script，填入一行：
   `sh "$ORCA_ROOT_PATH/.claude/orca-setup.sh"`
-  然后运行 `orca repo show --repo id:9833289c-9950-4a60-8ee8-66f62a650d6e --json`，确认 `hookSettings.scripts.setup` 已是这一行。
+  同一页面把 agent 启动策略改成"等 setup 完成后再启动"（`setupAgentStartupPolicy: wait-for-setup`）。否则 agent 可能在 `AGENTS.md` 链接进来之前就已经启动，或者和 setup 里的 `pnpm install` 同时运行。
+  然后运行 `orca repo show --repo id:9833289c-9950-4a60-8ee8-66f62a650d6e --json`，确认 `hookSettings.scripts.setup` 已是这一行，且 `setupAgentStartupPolicy` 为 `wait-for-setup`。
 
 - [ ] **Step 5: 用一个临时 worktree 做端到端验证**
 
