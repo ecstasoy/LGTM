@@ -72,6 +72,7 @@ type WebhookIssueComment struct {
 		User struct {
 			Login string `json:"login"`
 		} `json:"user"`
+		AuthorAssociation string `json:"author_association"` // commenter's relationship to the repo; gates slash commands
 	} `json:"comment"`
 	Repository struct {
 		Owner struct {
@@ -206,6 +207,15 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 		return
 	}
 
+	// only people with a stake in the repo may spend reviews or make the bot talk; anyone else is ignored silently
+	if !trustedCommenter[p.Comment.AuthorAssociation] {
+		slog.Info("webhook: slash command from untrusted commenter ignored",
+			"cmd", cmd, "owner", p.Repository.Owner.Login, "repo", p.Repository.Name,
+			"pr", p.Issue.Number, "sender", p.Sender.Login, "association", p.Comment.AuthorAssociation)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "untrusted commenter"})
+		return
+	}
+
 	slog.Info("webhook: slash command received",
 		"cmd", cmd, "owner", p.Repository.Owner.Login, "repo", p.Repository.Name,
 		"pr", p.Issue.Number, "sender", p.Sender.Login)
@@ -230,6 +240,14 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 		// ack unrecognized commands too, listing what is available
 		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
 	}
+}
+
+// trustedCommenter lists the author_association values allowed to run slash commands.
+// CONTRIBUTOR / FIRST_TIMER / NONE are excluded: on a public repo anyone can earn those.
+var trustedCommenter = map[string]bool{
+	"OWNER":        true,
+	"MEMBER":       true,
+	"COLLABORATOR": true,
 }
 
 // parseSlashCommand finds the first /lgtm <cmd> line in body and returns <cmd>; "" when there is none
