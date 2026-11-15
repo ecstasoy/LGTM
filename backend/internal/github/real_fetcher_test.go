@@ -165,6 +165,31 @@ func TestRealFetcher_Fetch_StateMerged(t *testing.T) {
 	}
 }
 
+func TestRealFetcher_Fetch_ReportsRepoVisibility(t *testing.T) {
+	for _, private := range []bool{true, false} {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/repos/o/r/pulls/1", func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"title": "x",
+				"head":  map[string]any{"sha": "0"},
+				"base":  map[string]any{"ref": "main", "repo": map[string]any{"private": private}},
+			})
+		})
+		mux.HandleFunc("/repos/o/r/pulls/1/files", func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode([]any{})
+		})
+		f, cleanup := stubServer(t, mux)
+		got, err := f.Fetch(context.Background(), "https://github.com/o/r/pull/1")
+		cleanup()
+		if err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if got.Private != private {
+			t.Errorf("Private=%v, want %v", got.Private, private)
+		}
+	}
+}
+
 func TestRealFetcher_Fetch_EmptyLabels(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/o/r/pulls/1", func(w http.ResponseWriter, r *http.Request) {
