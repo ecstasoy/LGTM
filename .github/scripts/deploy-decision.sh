@@ -14,9 +14,10 @@ decide() { echo "deploy=$1"; echo "$2" >&2; exit 0; }
 [ "$event" = workflow_dispatch ] && decide true "manual dispatch"
 
 # Our own label first; flyctl's GH_SHA is only right for deploys made by the old push trigger
-deployed=$(jq -r '.[0].Labels | (fromjson? // {}) | .LGTM_DEPLOY_SHA // .GH_SHA // empty' "$image_json")
+# Unreadable output counts as "unknown", and only a full sha is trusted (a ref name like HEAD would also resolve)
+deployed=$(jq -r '.[0].Labels | (fromjson? // {}) | .LGTM_DEPLOY_SHA // .GH_SHA // empty' "$image_json" 2>/dev/null || true)
 
-if [ -z "$deployed" ] || ! git cat-file -e "${deployed}^{commit}" 2>/dev/null; then
+if ! [[ "$deployed" =~ ^[0-9a-f]{40}$ ]] || ! git cat-file -e "${deployed}^{commit}" 2>/dev/null; then
     decide true "deployed commit unknown (${deployed:-none}); deploying"
 fi
 if git merge-base --is-ancestor "$head_sha" "$deployed"; then

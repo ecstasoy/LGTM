@@ -33,6 +33,12 @@ img "{\"LGTM_DEPLOY_SHA\":\"0000000000000000000000000000000000000000\"}"
 expect "deployed commit missing from history deploys" true "$D"
 img "{\"LGTM_DEPLOY_SHA\":\"--output=/tmp/x\"}"
 expect "a label that is not a sha deploys" true "$D"
+img '{"LGTM_DEPLOY_SHA":"HEAD"}'
+expect "a ref name that resolves is still not a sha, so it deploys" true "$D"
+printf 'not json' > "$tmp/img.json"
+expect "unparseable image output deploys" true "$D"
+: > "$tmp/img.json"
+expect "empty image output deploys" true "$D"
 img "{\"LGTM_DEPLOY_SHA\":\"$D\"}"
 expect "workflow_dispatch always deploys" true "$D" workflow_dispatch
 exit $fail

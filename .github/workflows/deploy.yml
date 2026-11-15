@@ -54,7 +54,8 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          flyctl image show --config backend/fly.toml --json > "$RUNNER_TEMP/image.json"
+          # No machines yet, or a Fly API error: the decision treats the live commit as unknown and deploys
+          flyctl image show --config backend/fly.toml --json > "$RUNNER_TEMP/image.json" || echo '[]' > "$RUNNER_TEMP/image.json"
           bash .github/scripts/deploy-decision.sh "$(git rev-parse HEAD)" "$RUNNER_TEMP/image.json" "$EVENT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Deploy
