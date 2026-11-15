@@ -36,8 +36,9 @@ func drainSuggestions(t *testing.T, ch <-chan Event) (suggestions []Suggestion, 
 func TestSuggestionsStage_Run_WithPatch(t *testing.T) {
 	p := llm.NewMockProvider()
 	p.Reply = `{"suggestions":[{"file":"main.go","line":42,"type":"bug","title":"加锁防竞态","body":"在写 s.items 前加 s.mu.Lock()","patch":{"lang":"go","before":"s.items[k] = v","after":"s.mu.Lock()\ns.items[k] = v\ns.mu.Unlock()"}}]}`
+	files := []prctx.FileContext{{Path: "main.go", Patch: "@@ -40,3 +40,3 @@\n func f() {\n \tx := 1\n-\ts.items[k] = old\n+\ts.items[k] = v\n }"}}
 
-	ch, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test"}, p)
+	ch, err := SuggestionsStage{Locale: i18n.ZH}.Run(context.Background(), prctx.Context{L1Meta: "test", L2Files: files}, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -64,6 +65,32 @@ func TestSuggestionsStage_Run_WithPatch(t *testing.T) {
 	}
 	if s.Patch.Lang != "go" || !strings.Contains(s.Patch.After, "Lock") {
 		t.Errorf("patch 字段错: %+v", s.Patch)
+	}
+}
+
+// TestSuggestionsStage_Run_AnchorsToDiff pins the stage output to the supplied diff before it is emitted.
+func TestSuggestionsStage_Run_AnchorsToDiff(t *testing.T) {
+	p := llm.NewMockProvider()
+	p.Reply = `{"suggestions":[` +
+		`{"file":"store.go","line":20,"type":"bug","title":"t","body":"b","patch":{"lang":"go","before":"s.mu.Lock()\ns.items[k] = v\ns.mu.Unlock()","after":"s.put(k, v)"}},` +
+		`{"file":"store.go","line":30,"type":"bug","title":"t","body":"b","patch":{"lang":"go","before":"nope()","after":"yes()"}}]}`
+
+	ch, err := SuggestionsStage{Locale: i18n.EN}.Run(context.Background(), prctx.Context{L1Meta: "test", L2Files: anchorFiles()}, p)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	suggestions, errMsg, _ := drainSuggestions(t, ch)
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if len(suggestions) != 2 {
+		t.Fatalf("suggestions = %d, want 2", len(suggestions))
+	}
+	if got := suggestions[0]; got.StartLine != 13 || got.Line != 15 || got.Patch == nil {
+		t.Errorf("first = %d..%d patch=%v, want 13..15 with patch", got.StartLine, got.Line, got.Patch != nil)
+	}
+	if got := suggestions[1]; got.Patch != nil || !got.OutsideDiff {
+		t.Errorf("second patch=%v outside=%v, want patch dropped and outside the diff", got.Patch != nil, got.OutsideDiff)
 	}
 }
 

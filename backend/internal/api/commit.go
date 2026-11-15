@@ -85,6 +85,10 @@ func PostAdoptCommit(d Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 缺 file/line，无法定位到 PR diff", "code": CodeSuggestionNoAnchor})
 			return
 		}
+		if sg.OutsideDiff {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion is outside the diff; GitHub only accepts inline comments on changed lines", "code": CodeSuggestionNoAnchor})
+			return
+		}
 		if sg.Patch == nil || sg.Patch.After == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "suggestion 无 patch.after，无法生成 GitHub suggestion 块（用「评论」按钮可发纯文字建议）", "code": CodeSuggestionNoPatch})
 			return
@@ -108,7 +112,7 @@ func PostAdoptCommit(d Deps) gin.HandlerFunc {
 		// 1) post the review comment first (same body as the comment endpoint)
 		body := buildSuggestionCommentBody(sg)
 		cm, err := d.OAuthClient.PostPRComment(ctx, s.AccessToken, rec.Owner, rec.Repo, rec.PRNumber,
-			body, rec.HeadSHA, sg.File, sg.Line)
+			body, rec.HeadSHA, sg.File, sg.StartLine, sg.Line)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "post comment failed: " + err.Error()})
 			return
