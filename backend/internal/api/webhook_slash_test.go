@@ -26,6 +26,7 @@ type fakeGitHubAPI struct {
 	mu       sync.Mutex
 	comments []string
 	reviews  int
+	head     string // what GET /pulls/{n} reports as the head commit; empty answers 404
 }
 
 func (f *fakeGitHubAPI) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -34,6 +35,11 @@ func (f *fakeGitHubAPI) RoundTrip(r *http.Request) (*http.Response, error) {
 	body := `{}`
 	status := http.StatusCreated
 	switch {
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pulls/"):
+		status, body = http.StatusOK, `{"head":{"sha":"`+f.head+`"}}`
+		if f.head == "" {
+			status, body = http.StatusNotFound, `{}`
+		}
 	case strings.HasSuffix(r.URL.Path, "/access_tokens"):
 		body = `{"token":"inst-token"}`
 	case strings.HasSuffix(r.URL.Path, "/comments"):
