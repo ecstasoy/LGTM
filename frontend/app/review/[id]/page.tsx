@@ -552,12 +552,32 @@ function ReportContent({
   const t = useT();
   const locale = useLocale();
   const dropped = budget?.dropped ?? [];
+  const clipped = budget?.clipped ?? [];
+  const excluded = budget?.excluded ?? [];
   return (
     <>
       {shouldShowLocaleNotice(reviewLocale, locale) ? (
         <LocaleNotice reviewLocale={reviewLocale} />
       ) : null}
-      {dropped.length > 0 ? <DroppedFilesNotice files={dropped} /> : null}
+      {dropped.length > 0 ? (
+        <CoverageNotice
+          files={dropped}
+          title={t.review.droppedFilesNotice(dropped.length)}
+          note={t.review.droppedFilesCoverageNote}
+        />
+      ) : null}
+      {clipped.length > 0 ? (
+        <CoverageNotice
+          files={clipped}
+          title={t.review.clippedFilesNotice(clipped.length)}
+          note={t.review.clippedFilesCoverageNote}
+        />
+      ) : null}
+      {excluded.length > 0 ? (
+        <p className="text-xs text-muted" title={excluded.join("\n")}>
+          {t.review.excludedFilesNote(excluded.length)}
+        </p>
+      ) : null}
       {stageErrors.summary ? (
         <StageErrorBanner stage={t.review.stageSummary} error={stageErrors.summary} />
       ) : (
@@ -590,19 +610,19 @@ function LocaleNotice({ reviewLocale }: { reviewLocale: "zh" | "en" }) {
   );
 }
 
-// DroppedFilesNotice 大 PR 超 token 预算丢文件时，在报告顶部声明评审范围不完整
-function DroppedFilesNotice({ files }: { files: string[] }) {
+// CoverageNotice declares at the top of the report which files the review did not fully cover.
+function CoverageNotice({ files, title, note }: { files: string[]; title: string; note: string }) {
   const t = useT();
   const shown = files.slice(0, 8);
   const rest = files.length - shown.length;
   return (
     <div className="rounded-md border border-high-bd bg-high-bg px-3 py-2 text-sm text-high">
-      <div className="font-medium">{t.review.droppedFilesNotice(files.length)}</div>
+      <div className="font-medium">{title}</div>
       <div className="mt-1 break-all font-mono text-[12px] text-text-2">
         {shown.join(" · ")}
         {rest > 0 ? t.review.droppedFilesMore(rest) : ""}
       </div>
-      <div className="mt-1 text-[12px] text-muted">{t.review.droppedFilesCoverageNote}</div>
+      <div className="mt-1 text-[12px] text-muted">{note}</div>
     </div>
   );
 }
