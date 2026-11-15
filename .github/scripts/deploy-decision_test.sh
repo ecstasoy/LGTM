@@ -12,7 +12,9 @@ D=$(commit README.md d)         # README-only again, after C is deployed
 img() { printf '[{"Tag":"deployment-x","Labels":%s}]' "$(jq -Rn --arg l "$1" '$l')" > "$tmp/img.json"; }
 fail=0
 expect() { # name want head [event]
-  got=$(bash "$script" "$3" "$tmp/img.json" "${4:-workflow_run}" 2>/dev/null || true)
+  if ! got=$(bash "$script" "$3" "$tmp/img.json" "${4:-workflow_run}" 2>/dev/null); then
+    echo "FAIL $1: script exited non-zero (printed '$got')"; fail=1; return
+  fi
   if [ "$got" = "deploy=$2" ]; then echo "ok   $1"; else echo "FAIL $1: want deploy=$2, got '$got'"; fail=1; fi
 }
 img "{\"LGTM_DEPLOY_SHA\":\"$A\"}"
