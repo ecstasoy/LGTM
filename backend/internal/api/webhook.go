@@ -19,6 +19,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/oauth"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/review"
+	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
 // WebhookPR is the subset of GitHub pull_request webhook payload fields we use
@@ -253,20 +254,26 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// the ack comment uses the installation token, so the user sees "LGTM got it" immediately
-	if d.OAuthClient != nil && d.OAuthClient.AppID != 0 && len(d.OAuthClient.PrivateKeyPEM) > 0 && args.InstallationID != 0 {
-		jwt, err := oauth.AppJWT(d.OAuthClient.AppID, d.OAuthClient.PrivateKeyPEM)
-		if err != nil {
-			slog.Warn("slash review: app jwt failed", "err", err)
-		} else if tok, err := d.OAuthClient.GetInstallationToken(ctx, jwt, args.InstallationID); err != nil {
-			slog.Warn("slash review: installation token failed", "err", err)
-		} else {
-			_, _ = d.OAuthClient.PostIssueComment(ctx, tok.Token, args.Owner, args.Repo, args.Number,
-				"🤖 LGTM got your `/lgtm review` — reviewing now (full review lands in ~30s)…")
-		}
+	// Fetch before replying: the reply depends on whether this head commit was already reviewed.
+	pr, err := d.Fetcher.Fetch(ctx, args.PrURL)
+	if err != nil {
+		slog.Error("slash review: fetch PR failed", "err", err, "url", args.PrURL)
+		replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number,
+			"❌ LGTM couldn't load this PR from GitHub, so no review was started. Try `/lgtm review` again in a minute.")
+		return
 	}
 
-	// reuses the whole runWebhookReview path: fetch → idempotency check → index → review → post bot review
+	if rec := cachedReview(ctx, d, pr); rec != nil {
+		replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number, fmt.Sprintf(
+			"✅ LGTM already reviewed commit `%s`: %s%s\n\nPush a new commit to get a fresh review.",
+			shortSHA(pr.HeadSHA), reviewPageBase, rec.ID))
+		return
+	}
+
+	replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number,
+		"🤖 LGTM got your `/lgtm review` — reviewing now (full review lands in ~30s)…")
+
+	// reuses the whole runWebhookReview path: idempotency check → index → review → post bot review
 	runWebhookReview(d, webhookReviewArgs{
 		PrURL:          args.PrURL,
 		Owner:          args.Owner,
@@ -277,7 +284,37 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		SenderLogin:    args.SenderLogin,
 		PRAuthorLogin:  args.PRAuthorLogin,
 		TriggerAction:  "slash_review",
+		Prefetched:     &pr,
 	})
+}
+
+// replyAsBot posts a PR comment as the App bot; a no-op when the App is not configured.
+func replyAsBot(ctx context.Context, d Deps, installationID int64, owner, repo string, number int, body string) {
+	if d.OAuthClient == nil || d.OAuthClient.AppID == 0 || len(d.OAuthClient.PrivateKeyPEM) == 0 || installationID == 0 {
+		return
+	}
+	jwt, err := oauth.AppJWT(d.OAuthClient.AppID, d.OAuthClient.PrivateKeyPEM)
+	if err != nil {
+		slog.Warn("bot reply: app jwt failed", "err", err)
+		return
+	}
+	tok, err := d.OAuthClient.GetInstallationToken(ctx, jwt, installationID)
+	if err != nil {
+		slog.Warn("bot reply: installation token failed", "err", err)
+		return
+	}
+	if _, err := d.OAuthClient.PostIssueComment(ctx, tok.Token, owner, repo, number, body); err != nil {
+		slog.Warn("bot reply: post comment failed", "err", err)
+	}
+}
+
+// cachedReview returns the stored review for this head commit in the webhook locale, or nil.
+func cachedReview(ctx context.Context, d Deps, pr gh.PullRequest) *store.Record {
+	if d.Store == nil {
+		return nil
+	}
+	rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(effectiveDefaultLocale(d)))
+	return rec
 }
 
 // runSlashHelp lists the available commands when one is not recognized
@@ -344,6 +381,8 @@ type webhookReviewArgs struct {
 	// TriggerAction "opened" / "synchronize" / "reopened" / "slash_review"；
 	// used to vary the wording in the bot review body ("re-reviewed the latest pushed commit" vs "first review")
 	TriggerAction string
+	// Prefetched skips the GitHub fetch when the caller already has the PR (the slash path checks the cache first).
+	Prefetched *gh.PullRequest
 }
 
 // runWebhookReview runs the review in the background, then persists, pushes a notification and posts the bot review
@@ -352,10 +391,15 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	pr, err := d.Fetcher.Fetch(ctx, args.PrURL)
-	if err != nil {
-		slog.Error("webhook: fetch PR failed", "err", err, "url", args.PrURL)
-		return
+	var pr gh.PullRequest
+	if args.Prefetched != nil {
+		pr = *args.Prefetched
+	} else {
+		var err error
+		if pr, err = d.Fetcher.Fetch(ctx, args.PrURL); err != nil {
+			slog.Error("webhook: fetch PR failed", "err", err, "url", args.PrURL)
+			return
+		}
 	}
 
 	// webhook has no user request to negotiate a locale from; it always uses the deployment-configured default
@@ -363,8 +407,8 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 	locale := effectiveDefaultLocale(d)
 
 	// idempotency check: an existing review for the same (owner, repo, pr, head_sha, locale) → skip
-	if d.Store != nil {
-		if rec, _ := d.Store.Get(ctx, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, string(locale)); rec != nil {
+	{
+		if rec := cachedReview(ctx, d, pr); rec != nil {
 			slog.Info("webhook: cache hit, skipping re-review", "review_id", rec.ID)
 			for _, login := range uniqueRecipients(args.SenderLogin, args.PRAuthorLogin) {
 				PushNotification(ctx, d.Cache, login, Notification{
@@ -512,6 +556,9 @@ func postBotReview(
 	return err
 }
 
+// reviewPageBase prefixes a review ID to link to its full report.
+const reviewPageBase = "https://lgtm-alpha.vercel.app/review/"
+
 // buildBotReviewBody assembles the summary + review stats + a link out to lgtm.com
 // trigger varies the wording: synchronize emphasizes "re-reviewed the latest push", a slash command thanks the user who triggered it
 //
@@ -542,7 +589,7 @@ func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) s
 		fmt.Fprintf(&sb, "✨ Generated **%d** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n", sgCount)
 	}
 	if reviewID != "" {
-		fmt.Fprintf(&sb, "🔗 Full review (risk list + RAG-retrieved context): https://lgtm-alpha.vercel.app/review/%s\n", reviewID)
+		fmt.Fprintf(&sb, "🔗 Full review (risk list + RAG-retrieved context): %s%s\n", reviewPageBase, reviewID)
 	}
 	sb.WriteString("\n<sub>Posted automatically by LGTM. Pushing a new commit triggers a re-review; comment `/lgtm review` to trigger one manually; `/lgtm help` for more commands</sub>")
 	return sb.String()
@@ -562,6 +609,14 @@ func verifyHMAC(sig string, body, secret []byte) bool {
 	mac.Write(body)
 	got := mac.Sum(nil)
 	return hmac.Equal(want, got)
+}
+
+// shortSHA is the 7-character form GitHub links in PR comments.
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 func safePrefix(s string) string {
