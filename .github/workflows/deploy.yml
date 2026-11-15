@@ -1,51 +1,70 @@
-# 合 main 后自动部署后端到 Fly.io（前端 Vercel 走 Git integration 自动部）
+# Deploys the backend to Fly.io once CI has passed on a push to main; the frontend ships through Vercel's Git integration
 #
-# 触发：push 到 main 且改动落在 backend / frontend / docs / dockerignore 上
-#       frontend/docs 也触发是因为容器内 indexrepo 启动时扫 /app/src 含这些
-#       想强制刷新 RAG 索引但代码没动 → workflow_dispatch 手动触发
+# Trigger: CI completing on main. A deploy only happens when CI succeeded and the pushed commit touched
+#          backend / frontend / docs / .dockerignore / this file — the image bakes in frontend and docs for indexrepo.
+#          workflow_dispatch forces a deploy, e.g. to refresh the RAG index without a code change.
 #
-# 凭证：repo secrets 设 FLY_API_TOKEN（`flyctl tokens create deploy -x 90d`）
-# 失败处理：fail-fast；deploy 失败可 `flyctl releases rollback v<N>` 回滚
+# Credentials: FLY_API_TOKEN repo secret (`flyctl tokens create deploy -x 90d`)
+# Rollback: `flyctl releases rollback v<N>`
 
 name: Deploy backend to Fly.io
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "docs/**"
-      - ".dockerignore"
-      - ".github/workflows/deploy.yml"
-  workflow_dispatch: # 允许手动触发；想强制 RAG re-warmup 用
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # 同时只允许一个 deploy 跑；后到的 push 会等前一个完成（避免乱序部署）
+  # One deploy at a time; a later run waits instead of cancelling, so deploys never land out of order
   group: deploy-backend
   cancel-in-progress: false
 
 jobs:
   deploy:
     name: Fly.io deploy (lgtm-backend)
+    # PR runs of CI never deploy, and neither does a red CI on main
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Deploy exactly the commit CI tested, not whatever main points at now
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+
+      # workflow_run has no `paths` filter, so diff the pushed commit against its first parent instead
+      - name: Check deploy-relevant changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(backend/|frontend/|docs/|\.dockerignore$|\.github/workflows/deploy\.yml$)'; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "No deploy-relevant changes; skipping deploy"
+          fi
 
       - name: Setup flyctl
+        if: steps.changes.outputs.deploy == 'true'
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be
 
       - name: Deploy
+        if: steps.changes.outputs.deploy == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        # --remote-only：build 在 Fly builder 跑，不占 GitHub Actions 资源
-        # 构建上下文 = repo root（'.'），让 Dockerfile 能 COPY backend + frontend + docs 喂 indexrepo
-        # --strategy rolling：默认行为，machine 逐个替换；可改 immediate / canary
+        # --remote-only builds on Fly's builder; the build context is the repo root so the image can copy backend + frontend + docs
         run: |
           flyctl deploy --remote-only \
             --config backend/fly.toml \
