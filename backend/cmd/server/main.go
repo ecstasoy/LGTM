@@ -120,9 +120,10 @@ func buildDeps(cfg config.Config) api.Deps {
 	registry := buildRegistry(cfg)
 	defProvider, _ := registry.Default()
 	deps := api.Deps{
-		Fetcher:  gh.NewRealFetcher(cfg.GithubToken),
-		Provider: defProvider, // 注册表默认项；agent / 其它路径仍用它
-		Models:   registry,    // L2：按阶段 / 按请求经注册表解析 provider+model
+		Fetcher:    gh.NewRealFetcher(cfg.GithubToken),
+		FetcherFor: func(token string) gh.Fetcher { return gh.NewRealFetcher(token) },
+		Provider:   defProvider, // 注册表默认项；agent / 其它路径仍用它
+		Models:     registry,    // L2：按阶段 / 按请求经注册表解析 provider+model
 		// Builder 先占位 NewLayeredBuilder()，等下面构造完 retriever 后再用 WithRetriever 替换
 		Builder: prctx.NewLayeredBuilder(),
 		// 按阶段模型覆盖（L1）：空值走 provider 默认

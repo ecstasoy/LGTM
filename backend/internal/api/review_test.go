@@ -513,8 +513,8 @@ func TestPostReview_PRNotFound(t *testing.T) {
 	if res.StatusCode != 404 {
 		t.Errorf("status=%d, want 404; body=%s", res.StatusCode, body)
 	}
-	if !strings.Contains(body, "GITHUB_TOKEN") {
-		t.Errorf("错误消息应提示设置 GITHUB_TOKEN，得到 %s", body)
+	if strings.Contains(body, "GITHUB_TOKEN") || !strings.Contains(body, "登录") {
+		t.Errorf("a private PR needs the caller to sign in, not a server token; got %s", body)
 	}
 }
 

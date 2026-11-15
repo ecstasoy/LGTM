@@ -256,7 +256,7 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 	defer cancel()
 
 	// Fetch before replying: the reply depends on whether this head commit was already reviewed.
-	pr, err := d.Fetcher.Fetch(ctx, args.PrURL)
+	pr, err := webhookFetcher(ctx, d, args.InstallationID).Fetch(ctx, args.PrURL)
 	if err != nil {
 		slog.Error("slash review: fetch PR failed", "err", err, "url", args.PrURL)
 		replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number,
@@ -295,6 +295,26 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		Prefetched:     &pr,
 		Release:        release,
 	})
+}
+
+// webhookFetcher reads as the App installation that sent the event, so repos the App is installed on stay
+// reviewable when the server token is limited to public repositories; without the App it uses the server token.
+func webhookFetcher(ctx context.Context, d Deps, installationID int64) gh.Fetcher {
+	c := d.OAuthClient
+	if d.FetcherFor == nil || c == nil || c.AppID == 0 || len(c.PrivateKeyPEM) == 0 || installationID == 0 {
+		return d.Fetcher
+	}
+	jwt, err := oauth.AppJWT(c.AppID, c.PrivateKeyPEM)
+	if err != nil {
+		slog.Warn("webhook fetch: app jwt failed; using the server token", "err", err)
+		return d.Fetcher
+	}
+	tok, err := c.GetInstallationToken(ctx, jwt, installationID)
+	if err != nil {
+		slog.Warn("webhook fetch: installation token failed; using the server token", "err", err)
+		return d.Fetcher
+	}
+	return d.FetcherFor(tok.Token)
 }
 
 // replyAsBot posts a PR comment as the App bot; a no-op when the App is not configured.
@@ -428,7 +448,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 		pr = *args.Prefetched
 	} else {
 		var err error
-		if pr, err = d.Fetcher.Fetch(ctx, args.PrURL); err != nil {
+		if pr, err = webhookFetcher(ctx, d, args.InstallationID).Fetch(ctx, args.PrURL); err != nil {
 			slog.Error("webhook: fetch PR failed", "err", err, "url", args.PrURL)
 			return
 		}

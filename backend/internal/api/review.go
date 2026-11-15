@@ -19,6 +19,7 @@ import (
 	"github.com/ecstasoy/LGTM/backend/internal/llm"
 	"github.com/ecstasoy/LGTM/backend/internal/prctx"
 	"github.com/ecstasoy/LGTM/backend/internal/review"
+	"github.com/ecstasoy/LGTM/backend/internal/session"
 	"github.com/ecstasoy/LGTM/backend/internal/store"
 )
 
@@ -112,16 +113,40 @@ func resolveLocale(c *gin.Context, bodyLocale string, def i18n.Locale) i18n.Loca
 	return i18n.FromAcceptLanguage(c.GetHeader("Accept-Language"), def)
 }
 
+// fetchForCaller fetches as the signed-in user when possible, so GitHub decides what they can see.
+// Otherwise it falls back to the shared server token and hides private PRs as not found,
+// so a caller never sees a repository just because the server token can read it.
+func fetchForCaller(ctx context.Context, d Deps, sess *session.Session, url string) (gh.PullRequest, error) {
+	if sess != nil && sess.AccessToken != "" && d.FetcherFor != nil {
+		pr, err := d.FetcherFor(sess.AccessToken).Fetch(ctx, url)
+		if err == nil || errors.Is(err, gh.ErrInvalidPRURL) {
+			return pr, err
+		}
+		slog.Info("user-token fetch failed; retrying with the server token", "login", sess.Login, "err", err)
+	}
+	pr, err := d.Fetcher.Fetch(ctx, url)
+	if err != nil {
+		return gh.PullRequest{}, err
+	}
+	if pr.Private {
+		return gh.PullRequest{}, gh.ErrPRNotFound
+	}
+	return pr, nil
+}
+
 // PostReview takes { url }, reporting precondition errors as JSON first;
 // once past those it switches to text/event-stream and pushes one frame per stage event.
 func PostReview(d Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// reviewing has no login gate — zero-friction demo first; abuse is handled by the expensive rate limit middleware + head_sha cache
-		// a logged-in user's review is archived under their account (per-user history + delete); anonymous reviews skip the store so they do not pollute the list
-		var creatorLogin string
+		// no login gate: anonymous callers may review public PRs only (see fetchForCaller)
+		// a logged-in user's review is owned by them (per-user history + delete); an anonymous one is stored as a public record
+		var (
+			creatorLogin string
+			sess         *session.Session
+		)
 		if d.Sessions != nil {
-			if s := CurrentSession(c); s != nil {
-				creatorLogin = s.Login
+			if sess = CurrentSession(c); sess != nil {
+				creatorLogin = sess.Login
 			}
 		}
 
@@ -170,13 +195,13 @@ func PostReview(d Deps) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 
-		pr, err := d.Fetcher.Fetch(ctx, url)
+		pr, err := fetchForCaller(ctx, d, sess, url)
 		if err != nil {
 			switch {
 			case errors.Is(err, gh.ErrInvalidPRURL):
 				c.JSON(400, gin.H{"error": err.Error()})
 			case errors.Is(err, gh.ErrPRNotFound):
-				c.JSON(404, gin.H{"error": "PR 不存在或为私有仓库（请配置 GITHUB_TOKEN）", "code": CodePRNotFound})
+				c.JSON(404, gin.H{"error": "PR 不存在或为私有仓库（私有仓库请登录后评审）", "code": CodePRNotFound})
 			case errors.Is(err, gh.ErrAccessDenied):
 				c.JSON(403, gin.H{"error": "GitHub 拒绝访问（速率限制或权限不足）", "code": CodeGitHubForbidden})
 			default:

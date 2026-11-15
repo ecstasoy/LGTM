@@ -87,12 +87,12 @@ OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=sk-xxx
 LLM_MODEL=deepseek-chat
 
-GITHUB_TOKEN=ghp_xxx
+GITHUB_TOKEN=github_pat_xxx
 SQLITE_PATH=./data/reviews.db
 RAG_DB_PATH=./data/rag.db
 ```
 
-`openai` provider 调的是 OpenAI-compatible `/v1/chat/completions`。DeepSeek、OpenAI、Kimi、通义这类兼容接口都可以通过 `OPENAI_BASE_URL` 和 `LLM_MODEL` 切换。`GITHUB_TOKEN` 可选，但不填会走 GitHub 匿名限流，公开仓库也容易超过 60 req/h 的速率上限。
+`openai` provider 调的是 OpenAI-compatible `/v1/chat/completions`。DeepSeek、OpenAI、Kimi、通义这类兼容接口都可以通过 `OPENAI_BASE_URL` 和 `LLM_MODEL` 切换。`GITHUB_TOKEN` 可选，但不填会走 GitHub 匿名限流，公开仓库也容易超过 60 req/h 的速率上限。请用 fine-grained token，Repository access 选 "Public repositories (read-only)"，不加任何额外权限。不要让它能读私有仓库：私有 PR 用登录用户自己的 token 读取，webhook 评审用 GitHub App 的 installation token 读取。
 
 ### 接 OAuth 和 GitHub App
 

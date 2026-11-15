@@ -87,12 +87,12 @@ OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=sk-xxx
 LLM_MODEL=deepseek-chat
 
-GITHUB_TOKEN=ghp_xxx
+GITHUB_TOKEN=github_pat_xxx
 SQLITE_PATH=./data/reviews.db
 RAG_DB_PATH=./data/rag.db
 ```
 
-The `openai` provider calls the OpenAI-compatible `/v1/chat/completions`. DeepSeek, OpenAI, Kimi, Qwen and other compatible services can be swapped in through `OPENAI_BASE_URL` and `LLM_MODEL`. `GITHUB_TOKEN` is optional, but without it requests fall back to GitHub's anonymous rate limit, where even public repositories run past the 60 requests per hour ceiling easily.
+The `openai` provider calls the OpenAI-compatible `/v1/chat/completions`. DeepSeek, OpenAI, Kimi, Qwen and other compatible services can be swapped in through `OPENAI_BASE_URL` and `LLM_MODEL`. `GITHUB_TOKEN` is optional, but without it requests fall back to GitHub's anonymous rate limit, where even public repositories run past the 60 requests per hour ceiling easily. Use a fine-grained token with repository access set to "Public repositories (read-only)" and no extra permissions. Never give it access to private repositories: private PRs are read with the signed-in user's own token or, for webhook reviews, the GitHub App installation token.
 
 ### Wiring up OAuth and the GitHub App
 
