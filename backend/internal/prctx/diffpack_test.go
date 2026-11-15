@@ -211,3 +211,26 @@ func TestLayered_ClipsInsteadOfDropping(t *testing.T) {
 		t.Errorf("clipping overran the budget: used L2=%d", ctx.BudgetReport.UsedL2)
 	}
 }
+
+// A few big files must not starve the rest: each oversized file gets a fair share of what is left.
+func TestLayered_SharesBudgetAcrossOversizedFiles(t *testing.T) {
+	b := NewLayeredBuilder(WithTokenLimit(3000))
+	file := func(i int) string {
+		s := ""
+		for h := range 10 {
+			s += fmt.Sprintf("@@ -%d,1 +%d,1 @@\n", h*100+1, h*100+1) + strings.Repeat(fmt.Sprintf("+code%d\n", i), 60)
+		}
+		return s
+	}
+	var files []github.File
+	for i := range 4 {
+		files = append(files, github.File{Path: fmt.Sprintf("f%d.go", i), Status: "modified", Patch: file(i), Additions: 300})
+	}
+	ctx, err := b.Build(context.Background(), newPR(files))
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(ctx.L2Files) != 4 || len(ctx.BudgetReport.Dropped) != 0 {
+		t.Errorf("all four files should get a share: L2=%v dropped=%v", l2Paths(ctx), ctx.BudgetReport.Dropped)
+	}
+}

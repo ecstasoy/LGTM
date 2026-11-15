@@ -291,48 +291,39 @@ type l2Result struct {
 	clipped  []string
 }
 
-// allocateL2 fills the budget by fileRank, biggest change first within a rank, clips what overflows into the
-// leftover, then emits in PR order. Removed files stay out: L1 already lists them and they hold no new code.
+// allocateL2 spends the budget rank by rank (source first). Within a rank, small diffs go in whole and
+// oversized ones are clipped to a fair share of what is left, so a few big files cannot starve the rest.
+// Removed files stay out: L1 already lists them and they hold no new code. Output keeps PR order.
 func allocateL2(files []github.File, budget int) l2Result {
 	r := l2Result{dropped: []string{}}
 	patches := make(map[int]string, len(files))
-	var order []int
+	tokens := make(map[int]int, len(files))
+	var groups [rankDocs + 1][]int
 	for i, f := range files {
 		switch {
 		case isExcluded(f):
 			r.excluded = append(r.excluded, f.Path)
 		case f.Status != "removed":
 			patches[i] = compressPatch(f.Patch)
-			order = append(order, i)
+			tokens[i] = estimateTokens(patches[i])
+			rk := fileRank(f.Path)
+			groups[rk] = append(groups[rk], i)
 		}
 	}
-	sort.SliceStable(order, func(a, b int) bool {
-		fa, fb := files[order[a]], files[order[b]]
-		if ra, rb := fileRank(fa.Path), fileRank(fb.Path); ra != rb {
-			return ra < rb
-		}
-		return fa.Additions+fa.Deletions > fb.Additions+fb.Deletions
-	})
 
-	kept := make(map[int]string, len(order))
-	var overflow []int
-	for _, i := range order {
-		t := estimateTokens(patches[i])
-		if r.used+t > budget {
-			overflow = append(overflow, i)
-			continue
-		}
-		kept[i], r.used = patches[i], r.used+t
-	}
-	for _, i := range overflow {
-		if left := budget - r.used; left >= minClipTokens {
-			if p, ok := clipPatch(patches[i], left); ok {
-				kept[i], r.used = p, r.used+estimateTokens(p)
-				r.clipped = append(r.clipped, files[i].Path)
+	kept := make(map[int]string, len(patches))
+	for _, g := range groups {
+		sort.SliceStable(g, func(a, b int) bool { return tokens[g[a]] < tokens[g[b]] })
+		for n, i := range g {
+			left := budget - r.used
+			if tokens[i] <= left/(len(g)-n) {
+				kept[i], r.used = patches[i], r.used+tokens[i]
 				continue
 			}
+			// Everything from here is oversized; split the rest evenly, or favour the biggest changes if too thin.
+			r.packOversized(g[n:], files, patches, kept, budget)
+			break
 		}
-		r.dropped = append(r.dropped, files[i].Path)
 	}
 
 	r.files = make([]FileContext, 0, len(kept))
@@ -342,6 +333,45 @@ func allocateL2(files []github.File, budget int) l2Result {
 		}
 	}
 	return r
+}
+
+// packOversized clips each file to an even share of the leftover; when shares fall under minClipTokens,
+// only as many files as can get minClipTokens are kept, picked by lines changed.
+func (r *l2Result) packOversized(rest []int, files []github.File, patches, kept map[int]string, budget int) {
+	slots := (budget - r.used) / minClipTokens
+	if slots < len(rest) {
+		byChange := append([]int(nil), rest...)
+		sort.SliceStable(byChange, func(a, b int) bool {
+			fa, fb := files[byChange[a]], files[byChange[b]]
+			return fa.Additions+fa.Deletions > fb.Additions+fb.Deletions
+		})
+		chosen := make(map[int]bool, slots)
+		for _, i := range byChange[:max(slots, 0)] {
+			chosen[i] = true
+		}
+		var keep []int
+		for _, i := range rest {
+			if chosen[i] {
+				keep = append(keep, i)
+			} else {
+				r.dropped = append(r.dropped, files[i].Path)
+			}
+		}
+		rest = keep
+	}
+	for n, i := range rest {
+		share := (budget - r.used) / (len(rest) - n)
+		if t := estimateTokens(patches[i]); t <= share {
+			kept[i], r.used = patches[i], r.used+t
+			continue
+		}
+		if p, ok := clipPatch(patches[i], share); ok && share >= minClipTokens {
+			kept[i], r.used = p, r.used+estimateTokens(p)
+			r.clipped = append(r.clipped, files[i].Path)
+			continue
+		}
+		r.dropped = append(r.dropped, files[i].Path)
+	}
 }
 
 // estimateTokens 粗略估 token 数（不引 tiktoken 等真实分词器，按字符数 / 3 近似）。
