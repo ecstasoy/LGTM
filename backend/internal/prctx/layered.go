@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/ecstasoy/LGTM/backend/internal/github"
@@ -278,26 +279,43 @@ func buildL3Conventions(c github.Conventions) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// allocateL2 fills the budget by fileRank, biggest change first within a rank, then emits in PR order.
 func allocateL2(files []github.File, budget int) ([]FileContext, int, []string, []string) {
-	out := make([]FileContext, 0, len(files))
 	dropped := []string{}
 	var excluded []string
-	used := 0
-	for _, f := range files {
+	var order []int
+	for i, f := range files {
 		if isExcluded(f) {
 			excluded = append(excluded, f.Path)
 			continue
 		}
-		patchTokens := estimateTokens(f.Patch)
+		order = append(order, i)
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		fa, fb := files[order[a]], files[order[b]]
+		if ra, rb := fileRank(fa.Path), fileRank(fb.Path); ra != rb {
+			return ra < rb
+		}
+		return fa.Additions+fa.Deletions > fb.Additions+fb.Deletions
+	})
+
+	kept := make(map[int]bool, len(order))
+	used := 0
+	for _, i := range order {
+		patchTokens := estimateTokens(files[i].Patch)
 		if used+patchTokens > budget {
-			dropped = append(dropped, f.Path)
+			dropped = append(dropped, files[i].Path)
 			continue
 		}
-		out = append(out, FileContext{
-			Path:  f.Path,
-			Patch: f.Patch,
-		})
+		kept[i] = true
 		used += patchTokens
+	}
+
+	out := make([]FileContext, 0, len(kept))
+	for i, f := range files {
+		if kept[i] {
+			out = append(out, FileContext{Path: f.Path, Patch: f.Patch})
+		}
 	}
 	return out, used, dropped, excluded
 }

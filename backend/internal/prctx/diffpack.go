@@ -42,3 +42,38 @@ func isExcluded(f github.File) bool {
 	}
 	return generatedHeader.MatchString(f.Patch)
 }
+
+// L2 budget goes to source first; docs are the first to lose it.
+const (
+	rankSource = iota
+	rankTest
+	rankConfig
+	rankDocs
+)
+
+var configNames = map[string]bool{"Dockerfile": true, "Makefile": true, ".dockerignore": true, ".gitignore": true}
+
+var configExts = map[string]bool{
+	".json": true, ".yaml": true, ".yml": true, ".toml": true, ".ini": true, ".cfg": true, ".conf": true, ".xml": true,
+}
+
+var docExts = map[string]bool{".md": true, ".mdx": true, ".rst": true, ".txt": true, ".adoc": true}
+
+func fileRank(p string) int {
+	base := path.Base(p)
+	ext := path.Ext(base)
+	switch {
+	case docExts[ext] || strings.HasPrefix(p, "docs/"):
+		return rankDocs
+	case strings.HasSuffix(base, "_test.go") || strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") ||
+		strings.HasPrefix(base, "test_") || hasDir(p, "test") || hasDir(p, "tests") || hasDir(p, "__tests__") || hasDir(p, "testdata"):
+		return rankTest
+	case configNames[base] || configExts[ext] || strings.HasPrefix(p, ".github/"):
+		return rankConfig
+	}
+	return rankSource
+}
+
+func hasDir(p, dir string) bool {
+	return strings.HasPrefix(p, dir+"/") || strings.Contains(p, "/"+dir+"/")
+}

@@ -64,3 +64,62 @@ func TestLayered_ExcludesLockfilesFromL2(t *testing.T) {
 		t.Errorf("L1 should still list excluded files: %q", ctx.L1Meta)
 	}
 }
+
+func TestFileRank(t *testing.T) {
+	cases := map[string]int{
+		"internal/api/review.go":       rankSource,
+		"frontend/app/page.tsx":        rankSource,
+		"internal/api/review_test.go":  rankTest,
+		"frontend/lib/sse.test.ts":     rankTest,
+		"tests/test_parser.py":         rankTest,
+		"internal/x/testdata/in.json":  rankTest,
+		"fly.toml":                     rankConfig,
+		".github/workflows/deploy.yml": rankConfig,
+		"Dockerfile":                   rankConfig,
+		"README.md":                    rankDocs,
+		"docs/guide/setup.go":          rankDocs,
+	}
+	for p, want := range cases {
+		if got := fileRank(p); got != want {
+			t.Errorf("fileRank(%q) = %d, want %d", p, got, want)
+		}
+	}
+}
+
+// Source must win the budget even when docs and tests come first in GitHub's alphabetical order.
+func TestLayered_SourceBeatsDocsForBudget(t *testing.T) {
+	b := NewLayeredBuilder(WithTokenLimit(2500))
+	big := func(c string) string { return "@@ -1,1 +1,2000 @@\n" + strings.Repeat("+"+c+"\n", 2000) }
+	pr := newPR([]github.File{
+		{Path: "README.md", Status: "modified", Patch: big("d")},
+		{Path: "a_test.go", Status: "modified", Patch: big("t")},
+		{Path: "z.go", Status: "modified", Patch: big("s")},
+	})
+	ctx, err := b.Build(context.Background(), pr)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if paths := l2Paths(ctx); !contains(paths, "z.go") {
+		t.Errorf("source file should get the budget first, L2 = %v", paths)
+	}
+	if !contains(ctx.BudgetReport.Dropped, "README.md") {
+		t.Errorf("docs should be the first to go, Dropped = %v", ctx.BudgetReport.Dropped)
+	}
+}
+
+// Ranking picks what fits; the prompt still shows files in the PR's own order.
+func TestLayered_L2KeepsPROrder(t *testing.T) {
+	b := NewLayeredBuilder()
+	pr := newPR([]github.File{
+		{Path: "README.md", Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b"},
+		{Path: "b.go", Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b"},
+		{Path: "a_test.go", Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b"},
+	})
+	ctx, err := b.Build(context.Background(), pr)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if got := strings.Join(l2Paths(ctx), ","); got != "README.md,b.go,a_test.go" {
+		t.Errorf("L2 order = %s", got)
+	}
+}
