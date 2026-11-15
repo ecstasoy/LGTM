@@ -31,6 +31,8 @@ printf '[{"Tag":"x","Labels":null}]' > "$tmp/img.json"
 expect "null labels deploys" true "$D"
 img "{\"LGTM_DEPLOY_SHA\":\"0000000000000000000000000000000000000000\"}"
 expect "deployed commit missing from history deploys" true "$D"
+img "{\"LGTM_DEPLOY_SHA\":\"--output=/tmp/x\"}"
+expect "a label that is not a sha deploys" true "$D"
 img "{\"LGTM_DEPLOY_SHA\":\"$D\"}"
 expect "workflow_dispatch always deploys" true "$D" workflow_dispatch
 exit $fail
