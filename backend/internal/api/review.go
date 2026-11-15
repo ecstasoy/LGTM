@@ -201,7 +201,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 			case errors.Is(err, gh.ErrInvalidPRURL):
 				c.JSON(400, gin.H{"error": err.Error()})
 			case errors.Is(err, gh.ErrPRNotFound):
-				c.JSON(404, gin.H{"error": "PR 不存在或为私有仓库（请配置 GITHUB_TOKEN）", "code": CodePRNotFound})
+				c.JSON(404, gin.H{"error": "PR 不存在或为私有仓库（私有仓库请登录后评审）", "code": CodePRNotFound})
 			case errors.Is(err, gh.ErrAccessDenied):
 				c.JSON(403, gin.H{"error": "GitHub 拒绝访问（速率限制或权限不足）", "code": CodeGitHubForbidden})
 			default:
