@@ -112,6 +112,19 @@ func resolveLocale(c *gin.Context, bodyLocale string, def i18n.Locale) i18n.Loca
 	return i18n.FromAcceptLanguage(c.GetHeader("Accept-Language"), def)
 }
 
+// fetchForCaller fetches with the shared server token and hides private PRs as not found,
+// so a caller never sees a repository just because the server token can read it.
+func fetchForCaller(ctx context.Context, d Deps, url string) (gh.PullRequest, error) {
+	pr, err := d.Fetcher.Fetch(ctx, url)
+	if err != nil {
+		return gh.PullRequest{}, err
+	}
+	if pr.Private {
+		return gh.PullRequest{}, gh.ErrPRNotFound
+	}
+	return pr, nil
+}
+
 // PostReview takes { url }, reporting precondition errors as JSON first;
 // once past those it switches to text/event-stream and pushes one frame per stage event.
 func PostReview(d Deps) gin.HandlerFunc {
@@ -170,7 +183,7 @@ func PostReview(d Deps) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 
-		pr, err := d.Fetcher.Fetch(ctx, url)
+		pr, err := fetchForCaller(ctx, d, url)
 		if err != nil {
 			switch {
 			case errors.Is(err, gh.ErrInvalidPRURL):
