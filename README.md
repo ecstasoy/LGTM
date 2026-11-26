@@ -1,12 +1,12 @@
 # LGTM
 
-**English** · [简体中文](./README.md)
+**English** · [简体中文](./README.zh.md)
 
 LGTM is a review assistant for GitHub pull requests. It pulls the PR's metadata, diff, CI status, and the repository's convention documents, then runs three passes to produce a change summary, a list of risks, and inline suggestions. Sign in and your past reviews are saved. Install the GitHub App and LGTM can post suggestions back to the PR, or review new PRs and pushes automatically over webhooks.
 
 ## Try it online
 
-Hosted at <https://lgtm-alpha.vercel.app>
+Hosted at <https://lgtmreview.com>
 
 The basic flow:
 
@@ -108,7 +108,7 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVA
 GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 ```
 
-`PUBLIC_BASE_URL` is the web app's origin (default `https://lgtm-alpha.vercel.app`). Links in the bot's PR comments point there, and when `GITHUB_OAUTH_REDIRECT_URI` is unset the OAuth callback defaults to `PUBLIC_BASE_URL` + `/api/auth/github/callback`. Set it to a bare origin with no path; anything else stops the server at startup. A self-hosted deployment should set it to its own domain.
+`PUBLIC_BASE_URL` is the web app's origin (default `https://lgtmreview.com`). Links in the bot's PR comments point there, and when `GITHUB_OAUTH_REDIRECT_URI` is unset the OAuth callback defaults to `PUBLIC_BASE_URL` + `/api/auth/github/callback`. Set it to a bare origin with no path; anything else stops the server at startup. A self-hosted deployment should set it to its own domain.
 
 The current code parses `GITHUB_APP_PRIVATE_KEY` as PEM content and will not read a file path. For local webhook debugging, `ngrok http 8080` works: set the GitHub App's Webhook URL to `<ngrok-url>/api/webhook/github`.
 

@@ -1,12 +1,12 @@
 # LGTM
 
-[English](./README.en.md) · **中文**
+[English](./README.md) · **中文**
 
 LGTM 是一个面向 GitHub Pull Request 的评审助手。它会拉取 PR 元信息、diff、CI 状态和仓库约定文档，然后分三步生成变更摘要、风险列表和行内修改建议。登录后可以保存历史评审；安装 GitHub App 后，还能把建议发回 PR，或由 webhook 在新 PR 和 push 更新时自动评审。
 
 ## 在线试用
 
-线上地址：<https://lgtm-alpha.vercel.app>
+线上地址：<https://lgtmreview.com>
 
 基本流程：
 
@@ -108,7 +108,7 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVA
 GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 ```
 
-`PUBLIC_BASE_URL` 是网页端的地址（默认 `https://lgtm-alpha.vercel.app`）。bot 发到 PR 里的链接都指向它；不设 `GITHUB_OAUTH_REDIRECT_URI` 时，OAuth 回调默认是 `PUBLIC_BASE_URL` + `/api/auth/github/callback`。只能填不带路径的 origin，填错服务会在启动时直接报错。自托管部署应改成自己的域名。
+`PUBLIC_BASE_URL` 是网页端的地址（默认 `https://lgtmreview.com`）。bot 发到 PR 里的链接都指向它；不设 `GITHUB_OAUTH_REDIRECT_URI` 时，OAuth 回调默认是 `PUBLIC_BASE_URL` + `/api/auth/github/callback`。只能填不带路径的 origin，填错服务会在启动时直接报错。自托管部署应改成自己的域名。
 
 当前代码把 `GITHUB_APP_PRIVATE_KEY` 当 PEM 内容解析，不会自动读取文件路径。Webhook 本地调试可用 `ngrok http 8080`，GitHub App 的 Webhook URL 填 `<ngrok-url>/api/webhook/github`。
 
