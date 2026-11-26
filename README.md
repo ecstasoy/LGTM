@@ -108,7 +108,7 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVA
 GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 ```
 
-`PUBLIC_BASE_URL` is the web app's origin (default `https://lgtm-alpha.vercel.app`). Links in the bot's PR comments point there, and when `GITHUB_OAUTH_REDIRECT_URI` is unset the OAuth callback defaults to `PUBLIC_BASE_URL` + `/api/auth/github/callback`. Set it to a bare origin with no path; anything else stops the server at startup. A self-hosted deployment should set it to its own domain.
+`PUBLIC_BASE_URL` is the web app's origin (default `https://lgtmreview.com`). Links in the bot's PR comments point there, and when `GITHUB_OAUTH_REDIRECT_URI` is unset the OAuth callback defaults to `PUBLIC_BASE_URL` + `/api/auth/github/callback`. Set it to a bare origin with no path; anything else stops the server at startup. A self-hosted deployment should set it to its own domain.
 
 The current code parses `GITHUB_APP_PRIVATE_KEY` as PEM content and will not read a file path. For local webhook debugging, `ngrok http 8080` works: set the GitHub App's Webhook URL to `<ngrok-url>/api/webhook/github`.
 
