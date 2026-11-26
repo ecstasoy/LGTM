@@ -1,6 +1,6 @@
 # LGTM
 
-**English** · [简体中文](./README.md)
+**English** · [简体中文](./README.zh.md)
 
 LGTM is a review assistant for GitHub pull requests. It pulls the PR's metadata, diff, CI status, and the repository's convention documents, then runs three passes to produce a change summary, a list of risks, and inline suggestions. Sign in and your past reviews are saved. Install the GitHub App and LGTM can post suggestions back to the PR, or review new PRs and pushes automatically over webhooks.
 
