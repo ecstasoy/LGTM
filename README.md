@@ -6,7 +6,7 @@ LGTM is a review assistant for GitHub pull requests. It pulls the PR's metadata,
 
 ## Try it online
 
-Hosted at <https://lgtm-alpha.vercel.app>
+Hosted at <https://lgtmreview.com>
 
 The basic flow:
 
