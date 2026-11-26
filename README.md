@@ -108,6 +108,8 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVA
 GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 ```
 
+`PUBLIC_BASE_URL` is the web app's origin (default `https://lgtm-alpha.vercel.app`). Links in the bot's PR comments point there, and when `GITHUB_OAUTH_REDIRECT_URI` is unset the OAuth callback defaults to `PUBLIC_BASE_URL` + `/api/auth/github/callback`. Set it to a bare origin with no path; anything else stops the server at startup. A self-hosted deployment should set it to its own domain.
+
 The current code parses `GITHUB_APP_PRIVATE_KEY` as PEM content and will not read a file path. For local webhook debugging, `ngrok http 8080` works: set the GitHub App's Webhook URL to `<ngrok-url>/api/webhook/github`.
 
 Treat [`docs/github-app-manifest.yml`](./docs/github-app-manifest.yml) as the source of truth for App permissions: `contents: read`, `metadata: read`, `pull_requests: write`, `checks: read`, with `issues: read` kept if you want it. When a suggestion is actually applied as a commit, GitHub still has the final say, based on the signed-in user's permissions on the PR head branch and whether the fork allows edits.
