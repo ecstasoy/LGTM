@@ -1,8 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -48,10 +51,11 @@ type Config struct {
 	GithubAppWebhookSec string `env:"GITHUB_APP_WEBHOOK_SECRET"` // webhook 签名校验
 	GithubOAuthClientID string `env:"GITHUB_OAUTH_CLIENT_ID"`
 	GithubOAuthSecret   string `env:"GITHUB_OAUTH_CLIENT_SECRET"`
-	// GithubOAuthRedirectURI 必须跟 GitHub App settings 里 Callback URL 完全一致
-	// 默认 https://lgtm-alpha.vercel.app/api/auth/github/callback（Vercel rewrite → fly.dev）
-	// 本地 dev 改 http://localhost:3000/api/auth/github/callback（Next dev proxy）
-	GithubOAuthRedirectURI string `env:"GITHUB_OAUTH_REDIRECT_URI" envDefault:"https://lgtm-alpha.vercel.app/api/auth/github/callback"`
+	// PublicBaseURL is the web app's origin; bot comments link to it and the OAuth callback defaults under it.
+	PublicBaseURL string `env:"PUBLIC_BASE_URL" envDefault:"https://lgtm-alpha.vercel.app"`
+	// GithubOAuthRedirectURI must match the GitHub App's Callback URL exactly; empty means PublicBaseURL + oauthCallbackPath.
+	// Local dev sets http://localhost:3000/api/auth/github/callback (Next dev proxy).
+	GithubOAuthRedirectURI string `env:"GITHUB_OAUTH_REDIRECT_URI"`
 
 	// v3 可观测性：Sentry / OTLP；空 = 不启用
 	SentryDSN    string `env:"SENTRY_DSN"`
@@ -98,9 +102,41 @@ type ModelConfig struct {
 	Model     string `json:"model"`       // 该端点下的模型名
 }
 
+// DefaultPublicBaseURL is the hosted web app, used when PUBLIC_BASE_URL is unset.
+const DefaultPublicBaseURL = "https://lgtm-alpha.vercel.app"
+
+const oauthCallbackPath = "/api/auth/github/callback"
+
+// Load parses the environment and fills defaults derived from other fields.
+func Load() (Config, error) {
+	cfg, err := env.ParseAs[Config]()
+	if err != nil {
+		return Config{}, err
+	}
+	base, err := normalizeBaseURL(cfg.PublicBaseURL)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PublicBaseURL = base
+	if cfg.GithubOAuthRedirectURI == "" {
+		cfg.GithubOAuthRedirectURI = base + oauthCallbackPath
+	}
+	return cfg, nil
+}
+
+// normalizeBaseURL accepts a bare http(s) origin; a path would break the /api rewrite and every review link.
+func normalizeBaseURL(raw string) (string, error) {
+	trimmed := strings.TrimRight(raw, "/")
+	u, err := url.Parse(trimmed)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" {
+		return "", fmt.Errorf("PUBLIC_BASE_URL must be an http(s) origin like https://lgtm.example.com, got %q", raw)
+	}
+	return trimmed, nil
+}
+
 // MustLoad 解析环境变量；失败则打印错误并退出进程。
 func MustLoad() Config {
-	cfg, err := env.ParseAs[Config]()
+	cfg, err := Load()
 	if err != nil {
 		slog.Error("config load", "err", err)
 		os.Exit(1)
