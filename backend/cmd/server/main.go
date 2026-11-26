@@ -132,6 +132,7 @@ func buildDeps(cfg config.Config) api.Deps {
 			"risks":       cfg.RisksModel,
 			"suggestions": cfg.SuggestionsModel,
 		},
+		PublicBaseURL: cfg.PublicBaseURL,
 		// DefaultLocale: normalized once at startup so only "zh"/"en" ever reach the request-boundary resolver.
 		DefaultLocale: i18n.Normalize(cfg.DefaultLocale, i18n.ZH),
 	}

@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/ecstasoy/LGTM/backend/internal/api/middleware"
+	"github.com/ecstasoy/LGTM/backend/internal/config"
 	"github.com/ecstasoy/LGTM/backend/internal/github"
 	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
@@ -25,6 +26,8 @@ import (
 // OAuthClient + Sessions may be nil (with OAuth unconfigured, /api/auth/* returns 503)
 // Memory may be nil (disables agent follow-up session memory); worth having in production for better multi-turn follow-ups
 type Deps struct {
+	// PublicBaseURL is the web app origin that bot comments link to; empty means config.DefaultPublicBaseURL.
+	PublicBaseURL string
 	// Fetcher reads with the shared server token; it must never surface a private PR to a caller.
 	Fetcher github.Fetcher
 	// FetcherFor builds a fetcher acting as the given GitHub token (a signed-in user's), so GitHub enforces their access.
@@ -108,4 +111,12 @@ func registerRoutes(r *gin.Engine, d Deps, webhookSecret string) {
 
 	// In-app notifications: filled into the user's cache list once a webhook completes; the frontend polls for them
 	g.GET("/notifications", read, GetNotificationsHandler(d.Cache))
+}
+
+// baseURL is the origin for links posted to GitHub.
+func (d Deps) baseURL() string {
+	if d.PublicBaseURL == "" {
+		return config.DefaultPublicBaseURL
+	}
+	return d.PublicBaseURL
 }

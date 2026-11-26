@@ -317,8 +317,8 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 	if rec := cachedReview(ctx, d, pr); rec != nil {
 		release()
 		replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number, fmt.Sprintf(
-			"✅ LGTM already reviewed commit `%s`: %s%s\n\nPush a new commit to get a fresh review.",
-			shortSHA(pr.HeadSHA), reviewPageBase, rec.ID))
+			"✅ LGTM already reviewed commit `%s`: %s/review/%s\n\nPush a new commit to get a fresh review.",
+			shortSHA(pr.HeadSHA), d.baseURL(), rec.ID))
 		return
 	}
 
@@ -590,7 +590,7 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 
 	// push the bot review back to the PR (using the installation token)
 	if reviewID != "" && d.OAuthClient != nil && d.OAuthClient.AppID != 0 && len(d.OAuthClient.PrivateKeyPEM) > 0 {
-		err := postBotReview(ctx, d.OAuthClient, args.InstallationID, pr, reviewID, summaryBuf.String(), suggestionsData, args.TriggerAction)
+		err := postBotReview(ctx, d.OAuthClient, args.InstallationID, pr, reviewID, summaryBuf.String(), suggestionsData, args.TriggerAction, d.baseURL())
 		switch {
 		case errors.Is(err, errStaleHead):
 			slog.Info("webhook: skip bot review for a superseded commit", "review_id", reviewID, "reason", err)
@@ -638,6 +638,7 @@ func postBotReview(
 	reviewID, summary string,
 	suggRaw json.RawMessage,
 	triggerAction string,
+	baseURL string,
 ) error {
 	if installationID == 0 {
 		return fmt.Errorf("installation ID missing in webhook payload")
@@ -667,7 +668,7 @@ func postBotReview(
 			Path: s.File,
 			Line: s.Line,
 			Side: "RIGHT",
-			Body: buildSuggestionCommentBody(s),
+			Body: buildSuggestionCommentBody(s, baseURL),
 		})
 	}
 
@@ -678,20 +679,17 @@ func postBotReview(
 		return fmt.Errorf("%w: reviewed %s, head is now %s", errStaleHead, shortSHA(pr.HeadSHA), shortSHA(head))
 	}
 
-	body := buildBotReviewBody(summary, reviewID, len(suggestions), triggerAction)
+	body := buildBotReviewBody(summary, reviewID, len(suggestions), triggerAction, baseURL)
 	_, err = c.PostPRReview(ctx, tok.Token, pr.Owner, pr.Repo, pr.Number, pr.HeadSHA, body, inline)
 	return err
 }
-
-// reviewPageBase prefixes a review ID to link to its full report.
-const reviewPageBase = "https://lgtm-alpha.vercel.app/review/"
 
 // buildBotReviewBody assembles the summary + review stats + a link out to lgtm.com
 // trigger varies the wording: synchronize emphasizes "re-reviewed the latest push", a slash command thanks the user who triggered it
 //
 // Everything this function returns is posted straight to GitHub, so it is hardcoded English regardless of
 // DEFAULT_LOCALE — see the package-level note in comment.go for the rule this follows.
-func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) string {
+func buildBotReviewBody(summary, reviewID string, sgCount int, trigger, baseURL string) string {
 	var sb strings.Builder
 	switch trigger {
 	case "synchronize":
@@ -716,7 +714,7 @@ func buildBotReviewBody(summary, reviewID string, sgCount int, trigger string) s
 		fmt.Fprintf(&sb, "✨ Generated **%d** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n", sgCount)
 	}
 	if reviewID != "" {
-		fmt.Fprintf(&sb, "🔗 Full review (risk list + RAG-retrieved context): %s%s\n", reviewPageBase, reviewID)
+		fmt.Fprintf(&sb, "🔗 Full review (risk list + RAG-retrieved context): %s/review/%s\n", baseURL, reviewID)
 	}
 	sb.WriteString("\n<sub>Posted automatically by LGTM. Pushing a new commit triggers a re-review; comment `/lgtm review` to trigger one manually; `/lgtm help` for more commands</sub>")
 	return sb.String()
