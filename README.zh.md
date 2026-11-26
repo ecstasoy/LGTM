@@ -108,7 +108,7 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVA
 GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 ```
 
-`PUBLIC_BASE_URL` 是网页端的地址（默认 `https://lgtm-alpha.vercel.app`）。bot 发到 PR 里的链接都指向它；不设 `GITHUB_OAUTH_REDIRECT_URI` 时，OAuth 回调默认是 `PUBLIC_BASE_URL` + `/api/auth/github/callback`。只能填不带路径的 origin，填错服务会在启动时直接报错。自托管部署应改成自己的域名。
+`PUBLIC_BASE_URL` 是网页端的地址（默认 `https://lgtmreview.com`）。bot 发到 PR 里的链接都指向它；不设 `GITHUB_OAUTH_REDIRECT_URI` 时，OAuth 回调默认是 `PUBLIC_BASE_URL` + `/api/auth/github/callback`。只能填不带路径的 origin，填错服务会在启动时直接报错。自托管部署应改成自己的域名。
 
 当前代码把 `GITHUB_APP_PRIVATE_KEY` 当 PEM 内容解析，不会自动读取文件路径。Webhook 本地调试可用 `ngrok http 8080`，GitHub App 的 Webhook URL 填 `<ngrok-url>/api/webhook/github`。
 
