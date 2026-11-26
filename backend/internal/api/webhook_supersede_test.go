@@ -26,7 +26,7 @@ var reviewedPR = gh.PullRequest{Owner: "o", Repo: "r", Number: 7, HeadSHA: "old0
 // A review that finishes after a newer push must not land on the PR as if it were current.
 func TestPostBotReview_SkipsWhenHeadMoved(t *testing.T) {
 	api := &fakeGitHubAPI{head: "new1111"}
-	err := postBotReview(context.Background(), botClient(t, api), 99, reviewedPR, "rid", "sum", json.RawMessage(`[]`), "synchronize")
+	err := postBotReview(context.Background(), botClient(t, api), 99, reviewedPR, "rid", "sum", json.RawMessage(`[]`), "synchronize", testBase)
 	if !errors.Is(err, errStaleHead) {
 		t.Fatalf("want errStaleHead, got %v", err)
 	}
@@ -37,7 +37,7 @@ func TestPostBotReview_SkipsWhenHeadMoved(t *testing.T) {
 
 func TestPostBotReview_PostsWhenStillHead(t *testing.T) {
 	api := &fakeGitHubAPI{head: "old0000"}
-	if err := postBotReview(context.Background(), botClient(t, api), 99, reviewedPR, "rid", "sum", json.RawMessage(`[]`), "synchronize"); err != nil {
+	if err := postBotReview(context.Background(), botClient(t, api), 99, reviewedPR, "rid", "sum", json.RawMessage(`[]`), "synchronize", testBase); err != nil {
 		t.Fatal(err)
 	}
 	if _, reviews := api.snapshot(); reviews != 1 {
@@ -48,7 +48,7 @@ func TestPostBotReview_PostsWhenStillHead(t *testing.T) {
 // If GitHub cannot tell us the head, posting beats silently dropping a finished review.
 func TestPostBotReview_PostsWhenHeadUnknown(t *testing.T) {
 	api := &fakeGitHubAPI{}
-	if err := postBotReview(context.Background(), botClient(t, api), 99, reviewedPR, "rid", "sum", json.RawMessage(`[]`), "synchronize"); err != nil {
+	if err := postBotReview(context.Background(), botClient(t, api), 99, reviewedPR, "rid", "sum", json.RawMessage(`[]`), "synchronize", testBase); err != nil {
 		t.Fatal(err)
 	}
 	if _, reviews := api.snapshot(); reviews != 1 {
