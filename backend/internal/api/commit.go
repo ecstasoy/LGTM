@@ -106,7 +106,7 @@ func PostAdoptCommit(d Deps) gin.HandlerFunc {
 		}
 
 		// 1) post the review comment first (same body as the comment endpoint)
-		body := buildSuggestionCommentBody(sg)
+		body := buildSuggestionCommentBody(sg, d.baseURL())
 		cm, err := d.OAuthClient.PostPRComment(ctx, s.AccessToken, rec.Owner, rec.Repo, rec.PRNumber,
 			body, rec.HeadSHA, sg.File, sg.Line)
 		if err != nil {

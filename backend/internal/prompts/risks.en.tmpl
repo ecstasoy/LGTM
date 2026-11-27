@@ -34,6 +34,20 @@ The files below were changed, but their diffs exceeded the context budget and we
 {{ end }}
 Reach no verdict on these files: do not report risks in them, and do not assume they are safe either.
 {{ end }}
+{{ with .BudgetReport.Clipped }}
+## Files reviewed only in part (diff clipped)
+The diffs of the files below were cut to fit the context budget; each ends above with a "diff clipped" line:
+{{ range . }}- {{ . }}
+{{ end }}
+Judge only the hunks shown; reach no verdict on the clipped remainder.
+{{ end }}
+{{ with .BudgetReport.Excluded }}
+## Lockfiles and generated files (diff left out on purpose)
+These files changed, but they are lockfiles or generated code, so their diffs were not supplied:
+{{ range . }}- {{ . }}
+{{ end }}
+Do not report risks in them.
+{{ end }}
 ## Task
 Emit **strict JSON only** — no surrounding prose, no Markdown code fence — in this shape:
 

@@ -93,6 +93,7 @@ func (f *RealFetcher) Fetch(ctx context.Context, rawURL string) (PullRequest, er
 		HeadSHA:    headSHA,
 		Title:      pr.GetTitle(),
 		Body:       pr.GetBody(),
+		Private:    pr.GetBase().GetRepo().GetPrivate(),
 		Author:     pr.GetUser().GetLogin(),
 		AuthorRole: pr.GetAuthorAssociation(),
 		State:      state,
