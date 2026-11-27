@@ -134,6 +134,13 @@ export const en: Dict = {
         : `${n} files were too large for the token budget and weren't included in this review`,
     droppedFilesMore: (rest: number) => ` …+${rest} more`,
     droppedFilesCoverageNote: "Summary, risks, and suggestions don't cover the files above.",
+    clippedFilesNotice: (n: number) =>
+      n === 1
+        ? "1 file's diff was cut to fit the token budget, so only its first part was reviewed"
+        : `${n} files' diffs were cut to fit the token budget, so only their first parts were reviewed`,
+    clippedFilesCoverageNote: "Summary, risks, and suggestions don't cover the parts that were cut.",
+    excludedFilesNote: (n: number) =>
+      n === 1 ? "Skipped 1 lockfile or generated file" : `Skipped ${n} lockfiles or generated files`,
     agentReplyLabel: "Agent reply",
     loading: "Loading…",
     filesTabLabel: "Files",

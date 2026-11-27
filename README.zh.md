@@ -1,12 +1,12 @@
 # LGTM
 
-[English](./README.en.md) · **中文**
+[English](./README.md) · **中文**
 
 LGTM 是一个面向 GitHub Pull Request 的评审助手。它会拉取 PR 元信息、diff、CI 状态和仓库约定文档，然后分三步生成变更摘要、风险列表和行内修改建议。登录后可以保存历史评审；安装 GitHub App 后，还能把建议发回 PR，或由 webhook 在新 PR 和 push 更新时自动评审。
 
 ## 在线试用
 
-线上地址：<https://lgtm-alpha.vercel.app>
+线上地址：<https://lgtmreview.com>
 
 基本流程：
 
@@ -31,7 +31,7 @@ LGTM 是一个面向 GitHub Pull Request 的评审助手。它会拉取 PR 元�
 - 按 `owner/repo/pr/head_sha` 缓存结果。head SHA 不变时可直接回放历史结果。
 - 支持 SQLite 和 Postgres 作为持久化存储，支持 MemoryCache 和 RedisCache 做 session、限流和通知缓存。
 - 支持 GitHub OAuth 登录，session 放在 HttpOnly cookie 中。
-- 支持 GitHub App webhook：`pull_request.opened`、`synchronize`、`reopened` 自动评审；PR 评论 `/lgtm review` 可手动重跑。
+- 支持 GitHub App webhook：`pull_request.opened`、`synchronize`、`reopened` 自动评审；PR 评论 `/lgtm review` 可手动重跑。只有仓库的 owner、member、collaborator 能触发命令，同一个 PR 两分钟内最多重跑一次。
 - 支持把单条建议发成 PR review comment，建议带 `suggestion` 代码块时可进一步调用 GitHub GraphQL 应用成 commit。
 - 支持追问 Agent。沙盒工具（`read_file`、`list_dir`、`grep_patches`）只能访问本 PR 改动文件；接入 RAG 后额外提供 `search_repo` 工具按 query 在全仓索引内语义检索，不会任意读本地文件系统。
 
@@ -87,12 +87,12 @@ OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=sk-xxx
 LLM_MODEL=deepseek-chat
 
-GITHUB_TOKEN=ghp_xxx
+GITHUB_TOKEN=github_pat_xxx
 SQLITE_PATH=./data/reviews.db
 RAG_DB_PATH=./data/rag.db
 ```
 
-`openai` provider 调的是 OpenAI-compatible `/v1/chat/completions`。DeepSeek、OpenAI、Kimi、通义这类兼容接口都可以通过 `OPENAI_BASE_URL` 和 `LLM_MODEL` 切换。`GITHUB_TOKEN` 可选，但不填会走 GitHub 匿名限流，公开仓库也容易超过 60 req/h 的速率上限。
+`openai` provider 调的是 OpenAI-compatible `/v1/chat/completions`。DeepSeek、OpenAI、Kimi、通义这类兼容接口都可以通过 `OPENAI_BASE_URL` 和 `LLM_MODEL` 切换。`GITHUB_TOKEN` 可选，但不填会走 GitHub 匿名限流，公开仓库也容易超过 60 req/h 的速率上限。请用 fine-grained token，Repository access 选 "Public repositories (read-only)"，不加任何额外权限。不要让它能读私有仓库：私有 PR 用登录用户自己的 token 读取，webhook 评审用 GitHub App 的 installation token 读取。
 
 ### 接 OAuth 和 GitHub App
 
@@ -107,6 +107,10 @@ GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 ```
+
+`PUBLIC_BASE_URL` 是网页端的地址（默认 `https://lgtmreview.com`）。bot 发到 PR 里的链接都指向它；不设 `GITHUB_OAUTH_REDIRECT_URI` 时，OAuth 回调默认是 `PUBLIC_BASE_URL` + `/api/auth/github/callback`。只能填不带路径的 origin，填错服务会在启动时直接报错。自托管部署应改成自己的域名。
+
+webhook 触发的评审（push 和 `/lgtm review`）受三个上限约束：`WEBHOOK_MAX_CONCURRENT_REVIEWS`（默认每个进程同时最多跑 4 个，超出的事件直接丢弃并记日志）、`WEBHOOK_REVIEWS_PER_INSTALLATION_HOUR`（默认每个 App 安装每小时 30 次）、`WEBHOOK_REVIEWS_PER_REPO_HOUR`（默认每个仓库每小时 15 次）。配额用完时，bot 只在 PR 上留一条简短说明，这一小时内不再评审。设成 `0` 表示取消该项限制。小时配额存在缓存里，只有配了 `REDIS_URL` 才能跨实例共享。
 
 当前代码把 `GITHUB_APP_PRIVATE_KEY` 当 PEM 内容解析，不会自动读取文件路径。Webhook 本地调试可用 `ngrok http 8080`，GitHub App 的 Webhook URL 填 `<ngrok-url>/api/webhook/github`。
 
@@ -287,7 +291,7 @@ Agent 追问也是同一套思路：先把 L1/L3/L4 注入 prompt，再让工具
 
 架构和产品形态参考过以下方向：
 
-- qodo-ai/pr-agent：多阶段评审拆分。
+- qodo-ai/pr-agent：多阶段评审拆分，以及 PR 压缩策略（文件排序、去掉纯删除 hunk、截断超大 diff）。
 - CodeRabbit：风险分级和行内 review comment 形态。
 - Greptile：跨文件上下文检索。
 - Anthropic Claude Code Review：多轮验证和工具化 reviewer 的方向。

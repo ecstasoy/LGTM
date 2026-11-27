@@ -146,10 +146,10 @@ func TestWebhook_AcceptsSynchronizeAction(t *testing.T) {
 	}
 }
 
-// blockingFetcher holds Fetch until release closes, standing in for a slow GitHub call.
-type blockingFetcher struct{ release chan struct{} }
+// shutdownBlockingFetcher holds Fetch until release closes, standing in for a slow GitHub call.
+type shutdownBlockingFetcher struct{ release chan struct{} }
 
-func (f blockingFetcher) Fetch(ctx context.Context, _ string) (gh.PullRequest, error) {
+func (f shutdownBlockingFetcher) Fetch(ctx context.Context, _ string) (gh.PullRequest, error) {
 	select {
 	case <-f.release:
 	case <-ctx.Done():
@@ -164,16 +164,27 @@ func TestWebhook_ReviewRunsAsTrackedBackgroundWork(t *testing.T) {
 		{"pull_request", "pull_request",
 			`{"action":"synchronize","number":42,"pull_request":{"html_url":"https://github.com/o/r/pull/42","title":"x"},"repository":{"owner":{"login":"o"},"name":"r"},"installation":{"id":1},"sender":{"login":"u"}}`},
 		{"slash_review", "issue_comment",
-			`{"action":"created","issue":{"number":42,"title":"x","pull_request":{"html_url":"https://github.com/o/r/pull/42"}},"comment":{"body":"/lgtm review"},"repository":{"owner":{"login":"o"},"name":"r"},"sender":{"login":"u"}}`},
+			`{"action":"created","issue":{"number":42,"title":"x","pull_request":{"html_url":"https://github.com/o/r/pull/42"}},"comment":{"body":"/lgtm review","author_association":"MEMBER"},"repository":{"owner":{"login":"o"},"name":"r"},"sender":{"login":"u"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			release := make(chan struct{})
 			bg := &Background{}
+			t.Cleanup(func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				_ = bg.Wait(ctx)
+			})
 			secret := "s"
 			r := gin.New()
-			r.POST("/api/webhook/github", WebhookGitHub(Deps{Fetcher: blockingFetcher{release}, Background: bg}, secret))
+			limiter := NewWebhookLimiter(WebhookLimits{MaxConcurrent: 1})
+			r.POST("/api/webhook/github", WebhookGitHub(Deps{Fetcher: shutdownBlockingFetcher{release}, Background: bg, WebhookLimiter: limiter}, secret))
 
 			body := []byte(tc.body)
 			mac := hmac.New(sha256.New, []byte(secret))
@@ -187,6 +198,11 @@ func TestWebhook_ReviewRunsAsTrackedBackgroundWork(t *testing.T) {
 				t.Fatalf("status=%d want 202; body=%s", w.Code, w.Body.String())
 			}
 
+			if free, ok := limiter.TryAcquire(); ok {
+				free()
+				t.Error("running review did not hold its concurrency slot")
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 			defer cancel()
 			if err := bg.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -197,6 +213,11 @@ func TestWebhook_ReviewRunsAsTrackedBackgroundWork(t *testing.T) {
 			if err := bg.Wait(context.Background()); err != nil {
 				t.Fatalf("Wait after the review finished: %v", err)
 			}
+			free, ok := limiter.TryAcquire()
+			if !ok {
+				t.Fatal("completed review did not release its concurrency slot")
+			}
+			free()
 		})
 	}
 }

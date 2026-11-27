@@ -57,7 +57,7 @@ type Client struct {
 	ClientID     string
 	ClientSecret string
 	// RedirectURI 必须跟 GitHub App settings 里 Callback URL 完全一致
-	// e.g. https://lgtm-alpha.vercel.app/api/auth/github/callback
+	// e.g. https://lgtm.example.com/api/auth/github/callback (PUBLIC_BASE_URL + the callback path by default)
 	RedirectURI string
 
 	// AppID + PrivateKeyPEM 用于 webhook 路径换 installation token（bot 身份发评审）

@@ -143,10 +143,11 @@ func buildDeps(cfg config.Config) api.Deps {
 	registry := buildRegistry(cfg)
 	defProvider, _ := registry.Default()
 	deps := api.Deps{
-		Fetcher:  gh.NewRealFetcher(cfg.GithubToken),
-		Provider: defProvider, // registry default; the agent and other paths still use it
-		Models:   registry,    // L2: per-stage / per-request provider+model resolved through the registry
-		// placeholder NewLayeredBuilder(), replaced via WithRetriever once the retriever below is built
+		Fetcher:    gh.NewRealFetcher(cfg.GithubToken),
+		FetcherFor: func(token string) gh.Fetcher { return gh.NewRealFetcher(token) },
+		Provider:   defProvider, // registry default; the agent and other paths still use it
+		Models:     registry,    // L2: per-stage / per-request provider+model resolved through the registry
+		// The builder is replaced via WithRetriever once the retriever is built.
 		Builder: prctx.NewLayeredBuilder(),
 		// per-stage model overrides (L1): empty falls through to the provider default
 		StageModels: map[string]string{
@@ -154,9 +155,15 @@ func buildDeps(cfg config.Config) api.Deps {
 			"risks":       cfg.RisksModel,
 			"suggestions": cfg.SuggestionsModel,
 		},
+		PublicBaseURL: cfg.PublicBaseURL,
 		// DefaultLocale: normalized once at startup so only "zh"/"en" ever reach the request-boundary resolver.
 		DefaultLocale: i18n.Normalize(cfg.DefaultLocale, i18n.ZH),
 		Background:    &api.Background{},
+		WebhookLimiter: api.NewWebhookLimiter(api.WebhookLimits{
+			MaxConcurrent:          cfg.WebhookMaxConcurrentReviews,
+			PerInstallationPerHour: cfg.WebhookReviewsPerInstallationHour,
+			PerRepoPerHour:         cfg.WebhookReviewsPerRepoHour,
+		}),
 	}
 	if cfg.SummaryModel != "" || cfg.RisksModel != "" || cfg.SuggestionsModel != "" {
 		slog.Info("per-stage model routing",

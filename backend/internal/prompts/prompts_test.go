@@ -66,6 +66,29 @@ func TestTemplates_OmitDroppedSectionWhenEmpty(t *testing.T) {
 	}
 }
 
+// Clipped and excluded files must be named so the model knows what it saw only in part, or not at all.
+func TestTemplates_IncludeClippedAndExcludedFiles(t *testing.T) {
+	c := minimalCtx()
+	c.BudgetReport = prctx.BudgetReport{Clipped: []string{"big/handler.go"}, Excluded: []string{"go.sum"}}
+	for _, name := range allTemplates {
+		out := render(t, name, c)
+		if !strings.Contains(out, "big/handler.go") || !strings.Contains(out, "go.sum") {
+			t.Errorf("%s should list clipped and excluded files:\n%s", name, out)
+		}
+	}
+}
+
+func TestTemplates_OmitClippedAndExcludedSectionsWhenEmpty(t *testing.T) {
+	for _, name := range allTemplates {
+		out := render(t, name, minimalCtx())
+		for _, h := range []string{"diff clipped", "diff 被截断", "generated files", "生成文件"} {
+			if strings.Contains(out, h) {
+				t.Errorf("%s emits %q with nothing clipped or excluded", name, h)
+			}
+		}
+	}
+}
+
 func minimalCtx() prctx.Context {
 	return prctx.Context{
 		L1Meta:  "仓库: o/r#1",

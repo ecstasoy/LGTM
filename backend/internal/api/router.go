@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/ecstasoy/LGTM/backend/internal/api/middleware"
+	"github.com/ecstasoy/LGTM/backend/internal/config"
 	"github.com/ecstasoy/LGTM/backend/internal/github"
 	"github.com/ecstasoy/LGTM/backend/internal/i18n"
 	"github.com/ecstasoy/LGTM/backend/internal/index"
@@ -25,17 +26,25 @@ import (
 // OAuthClient + Sessions may be nil (with OAuth unconfigured, /api/auth/* returns 503)
 // Memory may be nil (disables agent follow-up session memory); worth having in production for better multi-turn follow-ups
 type Deps struct {
-	Fetcher     github.Fetcher
-	Provider    llm.Provider
-	Builder     prctx.Builder
-	Store       store.Store
-	Cache       store.Cache
-	Embedder    index.Embedder
-	Retriever   index.Retriever
-	Indexer     index.Indexer
-	OAuthClient *oauth.Client
-	Sessions    *session.Manager
-	Memory      memory.SessionStore
+	// PublicBaseURL is the web app origin that bot comments link to; empty means config.DefaultPublicBaseURL.
+	PublicBaseURL string
+	// Fetcher reads with the shared server token; it must never surface a private PR to a caller.
+	Fetcher github.Fetcher
+	// FetcherFor builds a fetcher acting as the given GitHub token (a signed-in user's), so GitHub enforces their access.
+	// Nil disables per-user fetching and every review goes through Fetcher.
+	FetcherFor func(token string) github.Fetcher
+	Provider   llm.Provider
+	Builder    prctx.Builder
+	Store      store.Store
+	Cache      store.Cache
+	// WebhookLimiter caps concurrent webhook reviews and their hourly quotas; nil means unlimited.
+	WebhookLimiter *WebhookLimiter
+	Embedder       index.Embedder
+	Retriever      index.Retriever
+	Indexer        index.Indexer
+	OAuthClient    *oauth.Client
+	Sessions       *session.Manager
+	Memory         memory.SessionStore
 	// StageModels overrides the model per stage name (summary/risks/suggestions);
 	// an empty map / empty value falls through to the provider default (L1 per-stage model routing).
 	StageModels map[string]string
@@ -106,4 +115,12 @@ func registerRoutes(r *gin.Engine, d Deps, webhookSecret string) {
 
 	// In-app notifications: filled into the user's cache list once a webhook completes; the frontend polls for them
 	g.GET("/notifications", read, GetNotificationsHandler(d.Cache))
+}
+
+// baseURL is the origin for links posted to GitHub.
+func (d Deps) baseURL() string {
+	if d.PublicBaseURL == "" {
+		return config.DefaultPublicBaseURL
+	}
+	return d.PublicBaseURL
 }

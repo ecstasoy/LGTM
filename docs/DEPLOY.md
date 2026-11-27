@@ -39,8 +39,10 @@ flyctl volumes create data --size 1 --region nrt
 # 4. 设 secrets
 flyctl secrets set \
   OPENAI_API_KEY=sk-xxx-your-deepseek-key \
-  GITHUB_TOKEN=ghp_your-pat
+  GITHUB_TOKEN=github_pat_your-token
 # 注意：OPENAI_API_KEY 这里填 DeepSeek key，因为 OPENAI_BASE_URL 已经在 fly.toml 设成 DeepSeek
+# GITHUB_TOKEN 用 fine-grained token，只给 "Public repositories (read-only)"；不要用带 repo scope 的 classic PAT，
+# 否则匿名用户可能借它读到私有仓库。私有 PR 由登录用户自己的 token 或 App installation token 读取
 
 # 5. 部署
 flyctl deploy
