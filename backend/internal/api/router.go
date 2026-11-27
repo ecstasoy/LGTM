@@ -32,17 +32,19 @@ type Deps struct {
 	Fetcher github.Fetcher
 	// FetcherFor builds a fetcher acting as the given GitHub token (a signed-in user's), so GitHub enforces their access.
 	// Nil disables per-user fetching and every review goes through Fetcher.
-	FetcherFor  func(token string) github.Fetcher
-	Provider    llm.Provider
-	Builder     prctx.Builder
-	Store       store.Store
-	Cache       store.Cache
-	Embedder    index.Embedder
-	Retriever   index.Retriever
-	Indexer     index.Indexer
-	OAuthClient *oauth.Client
-	Sessions    *session.Manager
-	Memory      memory.SessionStore
+	FetcherFor func(token string) github.Fetcher
+	Provider   llm.Provider
+	Builder    prctx.Builder
+	Store      store.Store
+	Cache      store.Cache
+	// WebhookLimiter caps concurrent webhook reviews and their hourly quotas; nil means unlimited.
+	WebhookLimiter *WebhookLimiter
+	Embedder       index.Embedder
+	Retriever      index.Retriever
+	Indexer        index.Indexer
+	OAuthClient    *oauth.Client
+	Sessions       *session.Manager
+	Memory         memory.SessionStore
 	// StageModels overrides the model per stage name (summary/risks/suggestions);
 	// an empty map / empty value falls through to the provider default (L1 per-stage model routing).
 	StageModels map[string]string

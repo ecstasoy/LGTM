@@ -160,9 +160,17 @@ func handlePullRequestEvent(c *gin.Context, d Deps, body []byte) {
 		"owner", p.Repository.Owner.Login, "repo", p.Repository.Name,
 		"pr", p.Number, "sender", p.Sender.Login, "installation", p.Installation.ID)
 
+	release, ok := d.WebhookLimiter.TryAcquire()
+	if !ok {
+		slog.Warn("webhook: review dropped, concurrency cap reached",
+			"owner", p.Repository.Owner.Login, "repo", p.Repository.Name, "pr", p.Number)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "busy"})
+		return
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "queued": true, "action": p.Action})
 
-	go runWebhookReview(d, webhookReviewArgs{
+	args := webhookReviewArgs{
 		PrURL:          p.PullRequest.HTMLURL,
 		Owner:          p.Repository.Owner.Login,
 		Repo:           p.Repository.Name,
@@ -174,7 +182,14 @@ func handlePullRequestEvent(c *gin.Context, d Deps, body []byte) {
 		// PushNotification dedupes internally when they are the same person (it does not, in fact, so the caller handles it)
 		PRAuthorLogin: p.PullRequest.User.Login,
 		TriggerAction: p.Action, // used in the bot review body (distinguishes a fresh review from a re-review)
-	})
+	}
+	go withSlot(release, func() { runWebhookReview(d, args) })
+}
+
+// withSlot runs fn and then gives its concurrency slot back.
+func withSlot(release func(), fn func()) {
+	defer release()
+	fn()
 }
 
 // handleIssueCommentEvent parses /lgtm <cmd> slash commands in PR comments
@@ -227,11 +242,23 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 		return
 	}
 
+	release := func() {}
+	if cmd == "review" {
+		r, ok := d.WebhookLimiter.TryAcquire()
+		if !ok {
+			slog.Warn("webhook: /lgtm review dropped, concurrency cap reached",
+				"owner", p.Repository.Owner.Login, "repo", p.Repository.Name, "pr", p.Issue.Number)
+			c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "busy"})
+			return
+		}
+		release = r
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "queued": true, "cmd": cmd})
 
 	switch cmd {
 	case "review":
-		go runSlashReview(d, slashReviewArgs{
+		args := slashReviewArgs{
 			PrURL:          p.Issue.PullRequest.HTMLURL,
 			Owner:          p.Repository.Owner.Login,
 			Repo:           p.Repository.Name,
@@ -240,7 +267,8 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 			InstallationID: p.Installation.ID,
 			SenderLogin:    p.Sender.Login,
 			PRAuthorLogin:  p.Issue.User.Login,
-		})
+		}
+		go withSlot(release, func() { runSlashReview(d, args) })
 	case "help":
 		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
 	default:
