@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -130,8 +131,12 @@ func main() {
 	slog.Info("stop signal received; draining in-flight work", "timeout", cfg.ShutdownTimeout.String())
 	drainCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	if err := api.Drain(drainCtx, srv, deps.Background); err != nil {
-		slog.Error("drain timed out; remaining work was cut off", "err", err)
+	drainErr := api.Drain(drainCtx, srv, deps.Background)
+	if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Error("server exited during shutdown", "err", err)
+	}
+	if drainErr != nil {
+		slog.Error("drain timed out; remaining work was cut off", "err", drainErr)
 		return
 	}
 	slog.Info("server drained")

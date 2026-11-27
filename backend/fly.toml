@@ -65,6 +65,7 @@ kill_timeout = "120s"
   # request, so it cannot be forged from outside.
   TRUSTED_PLATFORM = "Fly-Client-IP"
   # Leaves 10s of kill_timeout for the process to exit after the drain gives up.
+  # Keep this below kill_timeout so the process has time to exit after draining.
   SHUTDOWN_TIMEOUT = "110s"
 
   # RAG: rag.db lives on the volume too so the index survives restarts

@@ -18,7 +18,7 @@ func (b *Background) Go(f func()) {
 	b.wg.Go(f)
 }
 
-// Wait blocks until all work started by Go has returned, or ctx ends.
+// Wait is for shutdown after handlers stop adding work; its waiter lives until tracked work returns, even if ctx ends.
 func (b *Background) Wait(ctx context.Context) error {
 	if b == nil {
 		return nil
