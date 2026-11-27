@@ -57,6 +57,12 @@ type Config struct {
 	// Local dev sets http://localhost:3000/api/auth/github/callback (Next dev proxy).
 	GithubOAuthRedirectURI string `env:"GITHUB_OAUTH_REDIRECT_URI"`
 
+	// Webhook review limits bound what one App installation or repo can spend; 0 disables that limit.
+	// The concurrency cap is per process; the hourly quotas are shared through REDIS_URL when set.
+	WebhookMaxConcurrentReviews       int `env:"WEBHOOK_MAX_CONCURRENT_REVIEWS" envDefault:"4"`
+	WebhookReviewsPerInstallationHour int `env:"WEBHOOK_REVIEWS_PER_INSTALLATION_HOUR" envDefault:"30"`
+	WebhookReviewsPerRepoHour         int `env:"WEBHOOK_REVIEWS_PER_REPO_HOUR" envDefault:"15"`
+
 	// v3 可观测性：Sentry / OTLP；空 = 不启用
 	SentryDSN    string `env:"SENTRY_DSN"`
 	OTLPEndpoint string `env:"OTLP_ENDPOINT"`                        // OTel collector 地址，如 http://otel-collector:4318

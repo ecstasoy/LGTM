@@ -135,6 +135,11 @@ func buildDeps(cfg config.Config) api.Deps {
 		PublicBaseURL: cfg.PublicBaseURL,
 		// DefaultLocale: normalized once at startup so only "zh"/"en" ever reach the request-boundary resolver.
 		DefaultLocale: i18n.Normalize(cfg.DefaultLocale, i18n.ZH),
+		WebhookLimiter: api.NewWebhookLimiter(api.WebhookLimits{
+			MaxConcurrent:          cfg.WebhookMaxConcurrentReviews,
+			PerInstallationPerHour: cfg.WebhookReviewsPerInstallationHour,
+			PerRepoPerHour:         cfg.WebhookReviewsPerRepoHour,
+		}),
 	}
 	if cfg.SummaryModel != "" || cfg.RisksModel != "" || cfg.SuggestionsModel != "" {
 		slog.Info("per-stage model routing",
