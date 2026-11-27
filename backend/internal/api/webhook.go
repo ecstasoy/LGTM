@@ -183,7 +183,7 @@ func handlePullRequestEvent(c *gin.Context, d Deps, body []byte) {
 		PRAuthorLogin: p.PullRequest.User.Login,
 		TriggerAction: p.Action, // used in the bot review body (distinguishes a fresh review from a re-review)
 	}
-	go withSlot(release, func() { runWebhookReview(d, args) })
+	d.Background.Go(func() { withSlot(release, func() { runWebhookReview(d, args) }) })
 }
 
 // withSlot runs fn and then gives its concurrency slot back.
@@ -268,12 +268,16 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 			SenderLogin:    p.Sender.Login,
 			PRAuthorLogin:  p.Issue.User.Login,
 		}
-		go withSlot(release, func() { runSlashReview(d, args) })
+		d.Background.Go(func() { withSlot(release, func() { runSlashReview(d, args) }) })
 	case "help":
-		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
+		d.Background.Go(func() {
+			runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
+		})
 	default:
 		// ack unrecognized commands too, listing what is available
-		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
+		d.Background.Go(func() {
+			runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
+		})
 	}
 }
 
