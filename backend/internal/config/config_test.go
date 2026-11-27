@@ -47,3 +47,29 @@ func TestLoad_RejectsMalformedPublicBaseURL(t *testing.T) {
 		}
 	}
 }
+
+// Webhook reviews must be bounded out of the box; a deployment that sets nothing still gets limits.
+func TestLoad_WebhookLimitsHaveDefaults(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WebhookMaxConcurrentReviews != 4 || cfg.WebhookReviewsPerInstallationHour != 30 || cfg.WebhookReviewsPerRepoHour != 15 {
+		t.Errorf("defaults = %d/%d/%d, want 4/30/15",
+			cfg.WebhookMaxConcurrentReviews, cfg.WebhookReviewsPerInstallationHour, cfg.WebhookReviewsPerRepoHour)
+	}
+}
+
+func TestLoad_WebhookLimitsOverride(t *testing.T) {
+	t.Setenv("WEBHOOK_MAX_CONCURRENT_REVIEWS", "2")
+	t.Setenv("WEBHOOK_REVIEWS_PER_INSTALLATION_HOUR", "0")
+	t.Setenv("WEBHOOK_REVIEWS_PER_REPO_HOUR", "5")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WebhookMaxConcurrentReviews != 2 || cfg.WebhookReviewsPerInstallationHour != 0 || cfg.WebhookReviewsPerRepoHour != 5 {
+		t.Errorf("overrides = %d/%d/%d, want 2/0/5",
+			cfg.WebhookMaxConcurrentReviews, cfg.WebhookReviewsPerInstallationHour, cfg.WebhookReviewsPerRepoHour)
+	}
+}

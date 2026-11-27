@@ -110,6 +110,8 @@ GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 
 `PUBLIC_BASE_URL` 是网页端的地址（默认 `https://lgtmreview.com`）。bot 发到 PR 里的链接都指向它；不设 `GITHUB_OAUTH_REDIRECT_URI` 时，OAuth 回调默认是 `PUBLIC_BASE_URL` + `/api/auth/github/callback`。只能填不带路径的 origin，填错服务会在启动时直接报错。自托管部署应改成自己的域名。
 
+webhook 触发的评审（push 和 `/lgtm review`）受三个上限约束：`WEBHOOK_MAX_CONCURRENT_REVIEWS`（默认每个进程同时最多跑 4 个，超出的事件直接丢弃并记日志）、`WEBHOOK_REVIEWS_PER_INSTALLATION_HOUR`（默认每个 App 安装每小时 30 次）、`WEBHOOK_REVIEWS_PER_REPO_HOUR`（默认每个仓库每小时 15 次）。配额用完时，bot 只在 PR 上留一条简短说明，这一小时内不再评审。设成 `0` 表示取消该项限制。小时配额存在缓存里，只有配了 `REDIS_URL` 才能跨实例共享。
+
 当前代码把 `GITHUB_APP_PRIVATE_KEY` 当 PEM 内容解析，不会自动读取文件路径。Webhook 本地调试可用 `ngrok http 8080`，GitHub App 的 Webhook URL 填 `<ngrok-url>/api/webhook/github`。
 
 App 权限建议以 [`docs/github-app-manifest.yml`](./docs/github-app-manifest.yml) 为准：`contents: read`、`metadata: read`、`pull_requests: write`、`checks: read`，`issues: read` 可按需要保留。真正把 suggestion 应用成 commit 时，GitHub 还会按当前登录用户对 PR head 分支的权限和 fork 可编辑状态做最终裁决。

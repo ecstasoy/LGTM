@@ -160,9 +160,17 @@ func handlePullRequestEvent(c *gin.Context, d Deps, body []byte) {
 		"owner", p.Repository.Owner.Login, "repo", p.Repository.Name,
 		"pr", p.Number, "sender", p.Sender.Login, "installation", p.Installation.ID)
 
+	release, ok := d.WebhookLimiter.TryAcquire()
+	if !ok {
+		slog.Warn("webhook: review dropped, concurrency cap reached",
+			"owner", p.Repository.Owner.Login, "repo", p.Repository.Name, "pr", p.Number)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "busy"})
+		return
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "queued": true, "action": p.Action})
 
-	go runWebhookReview(d, webhookReviewArgs{
+	args := webhookReviewArgs{
 		PrURL:          p.PullRequest.HTMLURL,
 		Owner:          p.Repository.Owner.Login,
 		Repo:           p.Repository.Name,
@@ -174,7 +182,14 @@ func handlePullRequestEvent(c *gin.Context, d Deps, body []byte) {
 		// PushNotification dedupes internally when they are the same person (it does not, in fact, so the caller handles it)
 		PRAuthorLogin: p.PullRequest.User.Login,
 		TriggerAction: p.Action, // used in the bot review body (distinguishes a fresh review from a re-review)
-	})
+	}
+	go withSlot(release, func() { runWebhookReview(d, args) })
+}
+
+// withSlot runs fn and then gives its concurrency slot back.
+func withSlot(release func(), fn func()) {
+	defer release()
+	fn()
 }
 
 // handleIssueCommentEvent parses /lgtm <cmd> slash commands in PR comments
@@ -227,11 +242,23 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 		return
 	}
 
+	release := func() {}
+	if cmd == "review" {
+		r, ok := d.WebhookLimiter.TryAcquire()
+		if !ok {
+			slog.Warn("webhook: /lgtm review dropped, concurrency cap reached",
+				"owner", p.Repository.Owner.Login, "repo", p.Repository.Name, "pr", p.Issue.Number)
+			c.JSON(http.StatusOK, gin.H{"ok": true, "ignored": "busy"})
+			return
+		}
+		release = r
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{"ok": true, "queued": true, "cmd": cmd})
 
 	switch cmd {
 	case "review":
-		go runSlashReview(d, slashReviewArgs{
+		args := slashReviewArgs{
 			PrURL:          p.Issue.PullRequest.HTMLURL,
 			Owner:          p.Repository.Owner.Login,
 			Repo:           p.Repository.Name,
@@ -240,7 +267,8 @@ func handleIssueCommentEvent(c *gin.Context, d Deps, body []byte) {
 			InstallationID: p.Installation.ID,
 			SenderLogin:    p.Sender.Login,
 			PRAuthorLogin:  p.Issue.User.Login,
-		})
+		}
+		go withSlot(release, func() { runSlashReview(d, args) })
 	case "help":
 		go runSlashHelp(d, p.Repository.Owner.Login, p.Repository.Name, p.Issue.Number, p.Installation.ID)
 	default:
@@ -322,6 +350,11 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		return
 	}
 
+	if reviewQuotaExhausted(ctx, d, args.InstallationID, pr.Owner, pr.Repo, pr.Number) {
+		release()
+		return
+	}
+
 	replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number,
 		"🤖 LGTM got your `/lgtm review` — reviewing now (full review lands in ~30s)…")
 
@@ -338,6 +371,7 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		TriggerAction:  "slash_review",
 		Prefetched:     &pr,
 		Release:        release,
+		QuotaCharged:   true,
 	})
 }
 
@@ -359,6 +393,28 @@ func webhookFetcher(ctx context.Context, d Deps, installationID int64) gh.Fetche
 		return d.Fetcher
 	}
 	return d.FetcherFor(tok.Token)
+}
+
+// quotaNotice tells a PR why a commit was not reviewed; posted at most once per PR per hour.
+const quotaNotice = "⏸️ LGTM has used up this repository's review quota for the hour, so this commit was not reviewed. " +
+	"Push again or comment `/lgtm review` after the hour to get a review."
+
+// reviewQuotaExhausted charges one review to the hourly quotas; when it does not fit, it tells the PR
+// (once per hour, so a push storm cannot turn into a comment storm) and returns true.
+func reviewQuotaExhausted(ctx context.Context, d Deps, installationID int64, owner, repo string, number int) bool {
+	if d.WebhookLimiter.Charge(ctx, d.Cache, installationID, owner, repo) {
+		return false
+	}
+	slog.Warn("webhook: review skipped, hourly quota used up",
+		"installation", installationID, "owner", owner, "repo", repo, "pr", number)
+	if d.Cache == nil {
+		return true
+	}
+	key := fmt.Sprintf("webhook-quota-notice:%s/%s#%d", strings.ToLower(owner), strings.ToLower(repo), number)
+	if n, err := d.Cache.Incr(ctx, key, time.Hour); err == nil && n == 1 {
+		replyAsBot(ctx, d, installationID, owner, repo, number, quotaNotice)
+	}
+	return true
 }
 
 // replyAsBot posts a PR comment as the App bot; a no-op when the App is not configured.
@@ -479,6 +535,8 @@ type webhookReviewArgs struct {
 	Prefetched *gh.PullRequest
 	// Release, when set, means the caller already claimed this commit; the run releases it when done.
 	Release func()
+	// QuotaCharged means the caller already counted this review against the hourly quotas.
+	QuotaCharged bool
 }
 
 // runWebhookReview runs the review in the background, then persists, pushes a notification and posts the bot review
@@ -529,6 +587,10 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 			}
 			return
 		}
+	}
+
+	if !args.QuotaCharged && reviewQuotaExhausted(ctx, d, args.InstallationID, pr.Owner, pr.Repo, pr.Number) {
+		return
 	}
 
 	// index inline (same as the manual review path)
