@@ -7,54 +7,47 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
-// OpenAIProvider 调 OpenAI 兼容的 /v1/chat/completions
+// OpenAIProvider calls an OpenAI-compatible /v1/chat/completions endpoint
 type OpenAIProvider struct {
 	BaseURL string
 	APIKey  string
 	Model   string
 
-	HTTPClient *http.Client // 默认 http.DefaultClient
+	HTTPClient *http.Client // nil uses a client that bounds only the wait for response headers
+
+	// wait sleeps between retry attempts; nil means a context-aware timer. Swapped in tests.
+	wait func(ctx context.Context, d time.Duration) error
 }
 
-// NewOpenAIProvider 构造器
+// NewOpenAIProvider constructor
 func NewOpenAIProvider(baseURL, apiKey, model string) *OpenAIProvider {
 	return &OpenAIProvider{BaseURL: baseURL, APIKey: apiKey, Model: model}
 }
 
-// Stream 以 stream=true 发起 chat completion，按 SSE 推送 delta。
-// 支持 function calling：Request.Tools 非空时把 tools 传给 OpenAI，
-// 收到 tool_calls 累积完成后在 Done 帧之前 emit 一帧 Chunk{ToolCalls: [...]}。
+// Stream starts a chat completion with stream=true and pushes SSE deltas.
+// Supports function calling: non-empty Request.Tools are sent to the API,
+// and fully accumulated tool_calls are emitted as one Chunk{ToolCalls: [...]} before the Done frame.
 func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
 	body, err := buildRequestBody(req, p.Model)
 	if err != nil {
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(p.BaseURL, "/")+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
-	httpReq.Header.Set("Accept", "text/event-stream")
-
 	client := p.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultStreamingClient
 	}
-	resp, err := client.Do(httpReq)
+	resp, err := p.connect(ctx, client, body)
 	if err != nil {
-		return nil, fmt.Errorf("post chat completions: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("chat completions: status %d: %s", resp.StatusCode, string(b))
+		return nil, err
 	}
 
 	ch := make(chan Chunk, 16)
@@ -62,12 +55,105 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req Request) (<-chan Chunk,
 	return ch, nil
 }
 
-// streamSSE 按行扫描 SSE body，解析 `data: {...}` 推到 ch。
-// 在 ctx 取消 / `[DONE]` / EOF 时退出并 close(ch)。
+// responseHeaderTimeout bounds how long a chat completion may take to start streaming.
+const responseHeaderTimeout = 60 * time.Second
+
+var defaultStreamingClient = newStreamingClient(responseHeaderTimeout)
+
+// newStreamingClient times out waiting for response headers but never caps the body; http.Client.Timeout would cut long streams.
+func newStreamingClient(headerTimeout time.Duration) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = headerTimeout
+	return &http.Client{Transport: tr}
+}
+
+const (
+	maxAttempts   = 3
+	backoffBase   = 500 * time.Millisecond
+	maxRetryAfter = 30 * time.Second
+)
+
+// connect posts the request until it gets a 200, retrying transient statuses; a stream that has started is never retried.
+func (p *OpenAIProvider) connect(ctx context.Context, client *http.Client, body []byte) (*http.Response, error) {
+	endpoint := strings.TrimRight(p.BaseURL, "/") + "/v1/chat/completions"
+	for attempt := 1; ; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
+		httpReq.Header.Set("Accept", "text/event-stream")
+
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			if ctx.Err() != nil || attempt == maxAttempts {
+				if attempt > 1 {
+					return nil, fmt.Errorf("post chat completions after %d attempts: %w", attempt, err)
+				}
+				return nil, fmt.Errorf("post chat completions: %w", err)
+			}
+			if err := p.sleep(ctx, retryDelay(attempt, "")); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !retryableStatus(resp.StatusCode) || attempt == maxAttempts {
+			if attempt > 1 {
+				return nil, fmt.Errorf("chat completions: status %d after %d attempts: %s", resp.StatusCode, attempt, string(b))
+			}
+			return nil, fmt.Errorf("chat completions: status %d: %s", resp.StatusCode, string(b))
+		}
+		if err := p.sleep(ctx, retryDelay(attempt, resp.Header.Get("Retry-After"))); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func retryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// retryDelay honors a seconds-form Retry-After (capped), otherwise equal-jitter exponential backoff.
+func retryDelay(attempt int, retryAfter string) time.Duration {
+	if secs, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && secs >= 0 {
+		return min(time.Duration(secs)*time.Second, maxRetryAfter)
+	}
+	half := (backoffBase << (attempt - 1)) / 2
+	return half + time.Duration(rand.Int64N(int64(half)+1))
+}
+
+// sleep waits d or until ctx is done.
+func (p *OpenAIProvider) sleep(ctx context.Context, d time.Duration) error {
+	if p.wait != nil {
+		return p.wait(ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// streamSSE scans the SSE body line by line and pushes each parsed `data: {...}` onto ch.
+// Exits and closes ch on ctx cancel / `[DONE]` / EOF.
 //
-// Tool calls 累积逻辑：OpenAI 流式按 index 分片传 tool_calls；
-// 每个 index 累 id/name/arguments 字符串，到 finish_reason="tool_calls" 或 [DONE] 时
-// 整理成完整 ToolCall 列表 emit 一帧（不增量推，避免前端解析半截 JSON）。
+// Tool call accumulation: the stream delivers tool_calls in fragments keyed by index;
+// each index accumulates id/name/arguments, and on finish_reason="tool_calls" or [DONE]
+// they are emitted as one complete ToolCall list, never incrementally, so nothing downstream parses half a JSON.
 func streamSSE(ctx context.Context, body io.ReadCloser, ch chan<- Chunk) {
 	defer body.Close()
 	defer close(ch)
@@ -75,7 +161,7 @@ func streamSSE(ctx context.Context, body io.ReadCloser, ch chan<- Chunk) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 
-	// 按 index 累积 tool_calls；OpenAI 协议 index 是稳定整数键
+	// tool_calls accumulated by index; the index is a stable integer key in the protocol
 	type partialCall struct {
 		id        string
 		name      string
@@ -130,7 +216,7 @@ func streamSSE(ctx context.Context, body io.ReadCloser, ch chan<- Chunk) {
 
 		var delta openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &delta); err != nil {
-			continue // 跳过非法 JSON
+			continue // skip invalid JSON
 		}
 		for _, choice := range delta.Choices {
 			// content delta
@@ -141,7 +227,7 @@ func streamSSE(ctx context.Context, body io.ReadCloser, ch chan<- Chunk) {
 				case ch <- Chunk{Text: t}:
 				}
 			}
-			// tool_calls delta：按 index 累积
+			// tool_calls delta: accumulate by index
 			for _, tc := range choice.Delta.ToolCalls {
 				sawToolCalls = true
 				p, ok := partials[tc.Index]
@@ -159,7 +245,7 @@ func streamSSE(ctx context.Context, body io.ReadCloser, ch chan<- Chunk) {
 					p.arguments.WriteString(tc.Function.Arguments)
 				}
 			}
-			// finish_reason="tool_calls" → 本轮聚合完，提前 flush（仍等 [DONE] 终止流）
+			// finish_reason="tool_calls" ends this round, so flush early (still wait for [DONE] to end the stream)
 			if choice.FinishReason == "tool_calls" {
 				flushToolCalls()
 			}
@@ -174,8 +260,8 @@ func streamSSE(ctx context.Context, body io.ReadCloser, ch chan<- Chunk) {
 	}
 }
 
-// buildRequestBody 拼接 chat completions 请求体 JSON。
-// Messages 非空时用它；否则回退 System+User 单轮兼容 v1/v2 stage 调用。
+// buildRequestBody builds the chat completions request body JSON.
+// Uses Messages when non-empty; otherwise falls back to a single-turn System + User pair.
 func buildRequestBody(req Request, defaultModel string) ([]byte, error) {
 	model := req.Model
 	if model == "" {
@@ -215,7 +301,7 @@ func buildRequestBody(req Request, defaultModel string) ([]byte, error) {
 		Temperature: req.Temperature,
 		Stream:      true,
 	}
-	// Tools 优先于 JSONSchema（function calling 自带结构化）
+	// Tools take precedence over JSONSchema (function calling is already structured)
 	if len(req.Tools) > 0 {
 		body.Tools = make([]openAITool, 0, len(req.Tools))
 		for _, t := range req.Tools {
@@ -234,8 +320,8 @@ func buildRequestBody(req Request, defaultModel string) ([]byte, error) {
 	return json.Marshal(body)
 }
 
-// OpenAI chat completions 请求 / 响应类型
-// 一组放一起，方便维护
+// OpenAI chat completions request / response types
+// kept together for easier maintenance
 
 type openAIChatRequest struct {
 	Model          string                `json:"model"`
