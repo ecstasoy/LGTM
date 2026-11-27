@@ -25,7 +25,7 @@ func TestSplitBotReviewComments(t *testing.T) {
 		{File: "store.go", Line: 30, OutsideDiff: true, Type: "bug", Title: "outside", Body: "b"},
 		{File: "", Line: 0, Type: "bug", Title: "no anchor", Body: "b"},
 	}
-	inline, outside := splitBotReviewComments(sgs)
+	inline, outside := splitBotReviewComments(sgs, testBase)
 	if len(inline) != 2 {
 		t.Fatalf("inline = %d, want 2", len(inline))
 	}
@@ -44,7 +44,7 @@ func TestBuildBotReviewBody_ListsOutsideDiffNotes(t *testing.T) {
 	outside := []review.Suggestion{
 		{File: "store.go", Line: 30, OutsideDiff: true, Type: "bug", Title: "Check the error", Body: "Handle err\nbefore use."},
 	}
-	got := buildBotReviewBody("summary", "rev123", 0, outside, "opened")
+	got := buildBotReviewBody("summary", "rev123", 0, outside, "opened", testBase)
 	for _, want := range []string{"Notes outside the diff", "`store.go:30`", "**Check the error**", "Handle err before use."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("body missing %q:\n%s", want, got)

@@ -87,6 +87,8 @@ export interface BudgetReport {
   used_l3: number;
   used_l4?: number; // only used by v3 RAG
   dropped?: string[]; // file paths dropped entirely for budget reasons
+  clipped?: string[]; // files whose diff was cut to fit; only part was reviewed
+  excluded?: string[]; // lockfiles and generated files, left out on purpose
 }
 
 // ReviewSummary: an /api/reviews list item; does not include the payload.

@@ -1,12 +1,12 @@
 # LGTM
 
-**English** · [简体中文](./README.md)
+**English** · [简体中文](./README.zh.md)
 
 LGTM is a review assistant for GitHub pull requests. It pulls the PR's metadata, diff, CI status, and the repository's convention documents, then runs three passes to produce a change summary, a list of risks, and inline suggestions. Sign in and your past reviews are saved. Install the GitHub App and LGTM can post suggestions back to the PR, or review new PRs and pushes automatically over webhooks.
 
 ## Try it online
 
-Hosted at <https://lgtm-alpha.vercel.app>
+Hosted at <https://lgtmreview.com>
 
 The basic flow:
 
@@ -31,7 +31,7 @@ Reading a review needs no App installation. Installing the LGTM GitHub App on th
 - Caches results by `owner/repo/pr/head_sha`. As long as the head SHA has not changed, a past result replays directly.
 - Supports SQLite and Postgres for persistence, and MemoryCache or RedisCache for sessions, rate limiting, and notification caching.
 - Supports GitHub OAuth sign-in, with the session held in an HttpOnly cookie.
-- Supports GitHub App webhooks: `pull_request.opened`, `synchronize`, and `reopened` trigger an automatic review, and a `/lgtm review` comment on the PR reruns it by hand.
+- Supports GitHub App webhooks: `pull_request.opened`, `synchronize`, and `reopened` trigger an automatic review, and a `/lgtm review` comment on the PR reruns it by hand. Commands are honored only from repository owners, members and collaborators, at most once per PR every two minutes.
 - Can post a single suggestion as a PR review comment, and when that suggestion carries a `suggestion` code block, call the GitHub GraphQL API to apply it as a commit.
 - Supports a follow-up agent. Its sandboxed tools (`read_file`, `list_dir`, `grep_patches`) can only reach files this PR changed; with RAG wired up it also gets `search_repo`, which runs a semantic query against the repository-wide index. It never reads arbitrary paths on the local filesystem.
 
@@ -87,12 +87,12 @@ OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=sk-xxx
 LLM_MODEL=deepseek-chat
 
-GITHUB_TOKEN=ghp_xxx
+GITHUB_TOKEN=github_pat_xxx
 SQLITE_PATH=./data/reviews.db
 RAG_DB_PATH=./data/rag.db
 ```
 
-The `openai` provider calls the OpenAI-compatible `/v1/chat/completions`. DeepSeek, OpenAI, Kimi, Qwen and other compatible services can be swapped in through `OPENAI_BASE_URL` and `LLM_MODEL`. `GITHUB_TOKEN` is optional, but without it requests fall back to GitHub's anonymous rate limit, where even public repositories run past the 60 requests per hour ceiling easily.
+The `openai` provider calls the OpenAI-compatible `/v1/chat/completions`. DeepSeek, OpenAI, Kimi, Qwen and other compatible services can be swapped in through `OPENAI_BASE_URL` and `LLM_MODEL`. `GITHUB_TOKEN` is optional, but without it requests fall back to GitHub's anonymous rate limit, where even public repositories run past the 60 requests per hour ceiling easily. Use a fine-grained token with repository access set to "Public repositories (read-only)" and no extra permissions. Never give it access to private repositories: private PRs are read with the signed-in user's own token or, for webhook reviews, the GitHub App installation token.
 
 ### Wiring up OAuth and the GitHub App
 
@@ -107,6 +107,10 @@ GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 GITHUB_APP_WEBHOOK_SECRET=replace-with-random-secret
 ```
+
+`PUBLIC_BASE_URL` is the web app's origin (default `https://lgtmreview.com`). Links in the bot's PR comments point there, and when `GITHUB_OAUTH_REDIRECT_URI` is unset the OAuth callback defaults to `PUBLIC_BASE_URL` + `/api/auth/github/callback`. Set it to a bare origin with no path; anything else stops the server at startup. A self-hosted deployment should set it to its own domain.
+
+Webhook-triggered reviews (pushes and `/lgtm review`) are bounded by `WEBHOOK_MAX_CONCURRENT_REVIEWS` (default 4 running at once per process; extra events are dropped and logged), `WEBHOOK_REVIEWS_PER_INSTALLATION_HOUR` (default 30) and `WEBHOOK_REVIEWS_PER_REPO_HOUR` (default 15). When a quota runs out, the bot leaves one short notice on the PR and skips the review until the next hour. Set a value to `0` to remove that limit. The hourly quotas live in the cache, so they hold across instances only when `REDIS_URL` is set.
 
 The current code parses `GITHUB_APP_PRIVATE_KEY` as PEM content and will not read a file path. For local webhook debugging, `ngrok http 8080` works: set the GitHub App's Webhook URL to `<ngrok-url>/api/webhook/github`.
 
@@ -287,7 +291,7 @@ The Go backend, the frontend components, the prompt templates, the SSE protocol,
 
 Its architecture and product shape drew on the following:
 
-- qodo-ai/pr-agent: splitting a review into multiple stages.
+- qodo-ai/pr-agent: splitting a review into multiple stages, and its PR compression strategy (ranking files, dropping deletion-only hunks, clipping oversized diffs).
 - CodeRabbit: risk grading and the shape of inline review comments.
 - Greptile: cross-file context retrieval.
 - Anthropic Claude Code Review: multi-turn verification and the tool-driven reviewer direction.

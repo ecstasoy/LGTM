@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/ecstasoy/LGTM/backend/internal/github"
@@ -136,19 +137,21 @@ func (b *LayeredBuilder) BuildWith(ctx context.Context, pr github.PullRequest, o
 	}
 
 	// L2 按 patch 大小逐个塞入；超出预算的文件入 Dropped 列表
-	l2Files, l2Used, dropped := allocateL2(pr.Files, l2Avail)
+	l2 := allocateL2(pr.Files, l2Avail)
 	return Context{
 		L1Meta:        l1Str,
-		L2Files:       l2Files,
+		L2Files:       l2.files,
 		L3Conventions: l3Str,
 		L4References:  l4Refs,
 		BudgetReport: BudgetReport{
 			TokenLimit: b.TokenLimit,
 			UsedL1:     l1Tokens,
-			UsedL2:     l2Used,
+			UsedL2:     l2.used,
 			UsedL3:     l3Tokens,
 			UsedL4:     l4Tokens,
-			Dropped:    dropped,
+			Dropped:    l2.dropped,
+			Excluded:   l2.excluded,
+			Clipped:    l2.clipped,
 		},
 	}, nil
 }
@@ -277,23 +280,98 @@ func buildL3Conventions(c github.Conventions) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func allocateL2(files []github.File, budget int) ([]FileContext, int, []string) {
-	out := make([]FileContext, 0, len(files))
-	dropped := []string{}
-	used := 0
-	for _, f := range files {
-		patchTokens := estimateTokens(f.Patch)
-		if used+patchTokens > budget {
-			dropped = append(dropped, f.Path)
+// minClipTokens is the smallest leftover worth spending on a partial diff.
+const minClipTokens = 200
+
+type l2Result struct {
+	files    []FileContext
+	used     int
+	dropped  []string
+	excluded []string
+	clipped  []string
+}
+
+// allocateL2 spends the budget rank by rank (source first). Within a rank, small diffs go in whole and
+// oversized ones are clipped to a fair share of what is left, so a few big files cannot starve the rest.
+// Removed files stay out: L1 already lists them and they hold no new code. Output keeps PR order.
+func allocateL2(files []github.File, budget int) l2Result {
+	r := l2Result{dropped: []string{}}
+	patches := make(map[int]string, len(files))
+	tokens := make(map[int]int, len(files))
+	var groups [rankDocs + 1][]int
+	for i, f := range files {
+		switch {
+		case isExcluded(f):
+			r.excluded = append(r.excluded, f.Path)
+		case f.Status != "removed":
+			patches[i] = compressPatch(f.Patch)
+			tokens[i] = estimateTokens(patches[i])
+			rk := fileRank(f.Path)
+			groups[rk] = append(groups[rk], i)
+		}
+	}
+
+	kept := make(map[int]string, len(patches))
+	for _, g := range groups {
+		sort.SliceStable(g, func(a, b int) bool { return tokens[g[a]] < tokens[g[b]] })
+		for n, i := range g {
+			left := budget - r.used
+			if tokens[i] <= left/(len(g)-n) {
+				kept[i], r.used = patches[i], r.used+tokens[i]
+				continue
+			}
+			// Everything from here is oversized; split the rest evenly, or favour the biggest changes if too thin.
+			r.packOversized(g[n:], files, patches, kept, budget)
+			break
+		}
+	}
+
+	r.files = make([]FileContext, 0, len(kept))
+	for i, f := range files {
+		if p, ok := kept[i]; ok {
+			r.files = append(r.files, FileContext{Path: f.Path, Patch: p})
+		}
+	}
+	return r
+}
+
+// packOversized clips each file to an even share of the leftover; when shares fall under minClipTokens,
+// only as many files as can get minClipTokens are kept, picked by lines changed.
+func (r *l2Result) packOversized(rest []int, files []github.File, patches, kept map[int]string, budget int) {
+	slots := (budget - r.used) / minClipTokens
+	if slots < len(rest) {
+		byChange := append([]int(nil), rest...)
+		sort.SliceStable(byChange, func(a, b int) bool {
+			fa, fb := files[byChange[a]], files[byChange[b]]
+			return fa.Additions+fa.Deletions > fb.Additions+fb.Deletions
+		})
+		chosen := make(map[int]bool, slots)
+		for _, i := range byChange[:max(slots, 0)] {
+			chosen[i] = true
+		}
+		var keep []int
+		for _, i := range rest {
+			if chosen[i] {
+				keep = append(keep, i)
+			} else {
+				r.dropped = append(r.dropped, files[i].Path)
+			}
+		}
+		rest = keep
+	}
+	for n, i := range rest {
+		share := (budget - r.used) / (len(rest) - n)
+		if t := estimateTokens(patches[i]); t <= share {
+			kept[i], r.used = patches[i], r.used+t
 			continue
 		}
-		out = append(out, FileContext{
-			Path:  f.Path,
-			Patch: f.Patch,
-		})
-		used += patchTokens
+		if p, ok := clipPatch(patches[i], share); ok && share >= minClipTokens {
+			kept[i], r.used = p, r.used+estimateTokens(p)
+			r.clipped = append(r.clipped, files[i].Path)
+			continue
+		}
+		r.dropped = append(r.dropped, files[i].Path)
 	}
-	return out, used, dropped
 }
 
 // estimateTokens 粗略估 token 数（不引 tiktoken 等真实分词器，按字符数 / 3 近似）。

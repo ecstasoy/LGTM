@@ -46,6 +46,8 @@ type PullRequest struct {
 	HeadSHA string
 	Title   string
 	Body    string
+	// Private is the base repository's visibility; callers must not expose a private PR fetched with a shared token.
+	Private bool
 
 	// PR meta：用于落地页"最近评审"卡 / 评审顶栏 / 历史表格 / 会话视图分支 chip
 	Author     string    // GitHub login，可空（极少数情况）

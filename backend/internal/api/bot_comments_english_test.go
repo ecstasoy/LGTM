@@ -31,7 +31,7 @@ func containsCJK(s string) bool {
 // and may legitimately be non-English.
 func TestBuildBotReviewBody_NoCJK(t *testing.T) {
 	for _, trig := range []string{"opened", "synchronize", "reopened", "slash_review", ""} {
-		got := buildBotReviewBody("English summary text.", "rev123", 2, nil, trig)
+		got := buildBotReviewBody("English summary text.", "rev123", 2, nil, trig, testBase)
 		if containsCJK(got) {
 			t.Errorf("trigger=%q: buildBotReviewBody output contains CJK:\n%s", trig, got)
 		}
@@ -57,7 +57,7 @@ func TestBuildBotReviewBody_SuggestionCountWording(t *testing.T) {
 		{2, "✨ Generated **2** suggestions, attached as inline comments. Use GitHub's built-in \"Apply suggestion\" to commit any of them with a click.\n\n"},
 	}
 	for _, c := range cases {
-		got := buildBotReviewBody("summary", "rev123", c.count, nil, "opened")
+		got := buildBotReviewBody("summary", "rev123", c.count, nil, "opened", testBase)
 		if !strings.Contains(got, c.want) {
 			t.Errorf("count=%d: expected body to contain %q, got:\n%s", c.count, c.want, got)
 		}
@@ -85,7 +85,7 @@ func TestBuildSuggestionCommentBody_NoCJK(t *testing.T) {
 		Title: "Nil check missing",
 		Body:  "This may panic on a nil pointer.",
 		Patch: &review.Patch{After: "if x != nil {\n\t_ = x\n}"},
-	})
+	}, testBase)
 	if containsCJK(withPatch) {
 		t.Errorf("buildSuggestionCommentBody (with patch) contains CJK:\n%s", withPatch)
 	}
@@ -94,7 +94,7 @@ func TestBuildSuggestionCommentBody_NoCJK(t *testing.T) {
 		Type:  "style",
 		Title: "Prefer early return",
 		Body:  "Flatten this nested if.",
-	})
+	}, testBase)
 	if containsCJK(withoutPatch) {
 		t.Errorf("buildSuggestionCommentBody (without patch) contains CJK:\n%s", withoutPatch)
 	}

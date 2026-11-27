@@ -28,7 +28,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     -o /out/indexrepo ./cmd/indexrepo
 
 # ============ runner ============
-FROM alpine:3.20
+FROM alpine:3.24
 
 # CA certs 给 https 用；tzdata 给 logging 用本地时区
 RUN apk add --no-cache ca-certificates tzdata

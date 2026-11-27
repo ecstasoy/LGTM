@@ -114,7 +114,7 @@ func PostAdoptComment(d Deps) gin.HandlerFunc {
 		}
 
 		// build the comment body: title + body + ```suggestion block + provenance footer
-		body := buildSuggestionCommentBody(sg)
+		body := buildSuggestionCommentBody(sg, d.baseURL())
 
 		cm, err := d.OAuthClient.PostPRComment(ctx, s.AccessToken, rec.Owner, rec.Repo, rec.PRNumber,
 			body, rec.HeadSHA, sg.File, sg.StartLine, sg.Line)
@@ -181,7 +181,7 @@ func DeleteAdoptComment(d Deps) gin.HandlerFunc {
 // which back the web UI's Comment/Commit buttons), so it is hardcoded English everywhere: anything posted to
 // GitHub is English, regardless of DEFAULT_LOCALE; only the LGTM web UI itself follows the user's locale.
 // GitHub comments are read by PR participants, not by LGTM users.
-func buildSuggestionCommentBody(s review.Suggestion) string {
+func buildSuggestionCommentBody(s review.Suggestion, baseURL string) string {
 	var sb strings.Builder
 	sb.WriteString("**")
 	sb.WriteString(s.Title)
@@ -194,6 +194,6 @@ func buildSuggestionCommentBody(s review.Suggestion) string {
 		sb.WriteString(s.Patch.After)
 		sb.WriteString("\n```")
 	}
-	sb.WriteString("\n\n<sub>— generated automatically by [LGTM](https://lgtm-alpha.vercel.app)</sub>")
+	fmt.Fprintf(&sb, "\n\n<sub>— generated automatically by [LGTM](%s)</sub>", baseURL)
 	return sb.String()
 }
