@@ -14,7 +14,7 @@ import (
 const testBase = "https://lgtm.example.com"
 
 func TestBotLinks_UsePublicBaseURL(t *testing.T) {
-	body := buildBotReviewBody("sum", "01REV", 1, "opened", testBase)
+	body := buildBotReviewBody("sum", "01REV", 1, nil, "opened", testBase)
 	if !strings.Contains(body, testBase+"/review/01REV") || strings.Contains(body, "lgtm-alpha") {
 		t.Errorf("review link should use the configured base:\n%s", body)
 	}
