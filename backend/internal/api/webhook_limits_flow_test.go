@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gh "github.com/ecstasoy/LGTM/backend/internal/github"
+	"github.com/ecstasoy/LGTM/backend/internal/llm"
 )
 
 // blockingFetcher holds every fetch until unblock closes, so a test can keep review slots occupied.
@@ -80,5 +81,60 @@ func TestWebhook_ConcurrencyCap_DropsWorkWhenBusy(t *testing.T) {
 	}
 	if w := postPREvent(t, r, 4); w.Code != http.StatusAccepted {
 		t.Errorf("after the slot frees: status=%d body=%s, want 202", w.Code, w.Body.String())
+	}
+}
+
+func quotaNotices(comments []string) int {
+	n := 0
+	for _, c := range comments {
+		if bytes.Contains([]byte(c), []byte("quota")) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestWebhookReview_OverQuota_SkipsReviewAndNoticesOncePerPR(t *testing.T) {
+	api := &fakeGitHubAPI{}
+	prov := &countingProvider{inner: llm.NewMockProvider()}
+	d, _ := slashDeps(t, api, prov)
+	d.WebhookLimiter = NewWebhookLimiter(WebhookLimits{PerRepoPerHour: 1})
+
+	runWebhookReview(d, webhookArgs())
+	reviewed := prov.calls.Load()
+	if reviewed == 0 {
+		t.Fatal("the first review fits the quota and should run")
+	}
+
+	for _, head := range []string{"bbbbbbbbbbbbbb", "cccccccccccccc"} {
+		pr := webhookPrivatePR()
+		pr.HeadSHA = head
+		d.Fetcher = fakeFetcher{pr: pr}
+		runWebhookReview(d, webhookArgs())
+	}
+
+	if prov.calls.Load() != reviewed {
+		t.Errorf("model called %d more times past the quota", prov.calls.Load()-reviewed)
+	}
+	if comments, _ := api.snapshot(); quotaNotices(comments) != 1 {
+		t.Errorf("want exactly one quota notice on the PR, got %q", comments)
+	}
+}
+
+func TestSlashReview_OverQuota_NoticeInsteadOfReviewingNow(t *testing.T) {
+	api := &fakeGitHubAPI{}
+	prov := &countingProvider{inner: llm.NewMockProvider()}
+	d, _ := slashDeps(t, api, prov)
+	d.WebhookLimiter = NewWebhookLimiter(WebhookLimits{PerInstallationPerHour: 1})
+	d.WebhookLimiter.Charge(context.Background(), d.Cache, 99, "o", "r") // another PR used the hour's quota
+
+	runSlashReview(d, slashArgs())
+
+	comments, _ := api.snapshot()
+	if len(comments) != 1 || quotaNotices(comments) != 1 {
+		t.Errorf("want only the quota notice, got %q", comments)
+	}
+	if prov.calls.Load() != 0 {
+		t.Errorf("model called %d times past the quota", prov.calls.Load())
 	}
 }

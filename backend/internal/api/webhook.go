@@ -350,6 +350,11 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		return
 	}
 
+	if reviewQuotaExhausted(ctx, d, args.InstallationID, pr.Owner, pr.Repo, pr.Number) {
+		release()
+		return
+	}
+
 	replyAsBot(ctx, d, args.InstallationID, args.Owner, args.Repo, args.Number,
 		"🤖 LGTM got your `/lgtm review` — reviewing now (full review lands in ~30s)…")
 
@@ -366,6 +371,7 @@ func runSlashReview(d Deps, args slashReviewArgs) {
 		TriggerAction:  "slash_review",
 		Prefetched:     &pr,
 		Release:        release,
+		QuotaCharged:   true,
 	})
 }
 
@@ -387,6 +393,28 @@ func webhookFetcher(ctx context.Context, d Deps, installationID int64) gh.Fetche
 		return d.Fetcher
 	}
 	return d.FetcherFor(tok.Token)
+}
+
+// quotaNotice tells a PR why a commit was not reviewed; posted at most once per PR per hour.
+const quotaNotice = "⏸️ LGTM has used up this repository's review quota for the hour, so this commit was not reviewed. " +
+	"Push again or comment `/lgtm review` after the hour to get a review."
+
+// reviewQuotaExhausted charges one review to the hourly quotas; when it does not fit, it tells the PR
+// (once per hour, so a push storm cannot turn into a comment storm) and returns true.
+func reviewQuotaExhausted(ctx context.Context, d Deps, installationID int64, owner, repo string, number int) bool {
+	if d.WebhookLimiter.Charge(ctx, d.Cache, installationID, owner, repo) {
+		return false
+	}
+	slog.Warn("webhook: review skipped, hourly quota used up",
+		"installation", installationID, "owner", owner, "repo", repo, "pr", number)
+	if d.Cache == nil {
+		return true
+	}
+	key := fmt.Sprintf("webhook-quota-notice:%s/%s#%d", strings.ToLower(owner), strings.ToLower(repo), number)
+	if n, err := d.Cache.Incr(ctx, key, time.Hour); err == nil && n == 1 {
+		replyAsBot(ctx, d, installationID, owner, repo, number, quotaNotice)
+	}
+	return true
 }
 
 // replyAsBot posts a PR comment as the App bot; a no-op when the App is not configured.
@@ -507,6 +535,8 @@ type webhookReviewArgs struct {
 	Prefetched *gh.PullRequest
 	// Release, when set, means the caller already claimed this commit; the run releases it when done.
 	Release func()
+	// QuotaCharged means the caller already counted this review against the hourly quotas.
+	QuotaCharged bool
 }
 
 // runWebhookReview runs the review in the background, then persists, pushes a notification and posts the bot review
@@ -557,6 +587,10 @@ func runWebhookReview(d Deps, args webhookReviewArgs) {
 			}
 			return
 		}
+	}
+
+	if !args.QuotaCharged && reviewQuotaExhausted(ctx, d, args.InstallationID, pr.Owner, pr.Repo, pr.Number) {
+		return
 	}
 
 	// index inline (same as the manual review path)
